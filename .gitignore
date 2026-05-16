@@ -22,3 +22,13 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Laravel Boost generated artifacts
+.ai/
+.codex/
+.agents/
+.mcp.json
+AGENTS.md
+CLAUDE.md
+boost.json
+junie/

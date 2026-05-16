@@ -1,0 +1,99 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\UpdateDocumentStatusRequest;
+use App\Http\Resources\ApplicationDocumentResource;
+use App\Models\ApplicationDocument;
+use App\Models\ScholarshipApplication;
+use App\Models\ScholarshipNotification;
+use Illuminate\Http\JsonResponse;
+
+class DocumentController extends Controller
+{
+    /**
+     * Update one application document status.
+     */
+    public function updateStatus(UpdateDocumentStatusRequest $request, ApplicationDocument $document): JsonResponse
+    {
+        $validated = $request->validated();
+        $application = $document->application()->with('documents', 'program')->first();
+        $statusChanged = $document->status !== $validated['status'];
+        $remarksChanged = array_key_exists('remarks', $validated) && ($validated['remarks'] ?? null) !== $document->remarks;
+
+        $document->update([
+            'status' => $validated['status'],
+            'remarks' => $validated['remarks'] ?? $document->remarks,
+            'validated_by_id' => $request->user()?->id,
+        ]);
+
+        if ($application !== null) {
+            $missingRequirements = $application->missing_requirements ?? [];
+
+            if ($validated['status'] === 'Accepted') {
+                $missingRequirements = array_values(array_filter(
+                    $missingRequirements,
+                    static fn (string $requirement): bool => $requirement !== $document->name,
+                ));
+            } elseif (in_array($validated['status'], ['Rejected', 'Missing'], true)) {
+                $missingRequirements[] = $document->name;
+                $missingRequirements = array_values(array_unique($missingRequirements));
+            }
+
+            $application->update([
+                'missing_requirements' => $missingRequirements,
+            ]);
+
+            if ($statusChanged || $remarksChanged) {
+                $this->notifyApplicantOfDocumentStatus($document->refresh(), $application, $validated['remarks'] ?? null);
+            }
+        }
+
+        return response()->json([
+            'document' => new ApplicationDocumentResource($document->refresh()),
+        ]);
+    }
+
+    /**
+     * Notify a student about one document validation update.
+     */
+    private function notifyApplicantOfDocumentStatus(
+        ApplicationDocument $document,
+        ScholarshipApplication $application,
+        ?string $remarks,
+    ): void {
+        $programName = $application->program?->name ?? 'your scholarship application';
+        $message = "Your {$document->name} document for {$programName} is now {$document->status}.";
+
+        if ($remarks !== null && trim($remarks) !== '') {
+            $message .= ' Remarks: '.trim($remarks);
+        }
+
+        ScholarshipNotification::create([
+            'user_id' => $application->applicant_id,
+            'role' => null,
+            'type' => $this->notificationTypeForDocumentStatus($document->status),
+            'title' => 'Document Status Updated',
+            'message' => $message,
+            'notified_at' => now(),
+            'payload' => [
+                'applicationId' => $application->id,
+                'documentId' => $document->id,
+                'status' => $document->status,
+            ],
+        ]);
+    }
+
+    /**
+     * Map a document status to the notification style used by the UI.
+     */
+    private function notificationTypeForDocumentStatus(string $status): string
+    {
+        return match ($status) {
+            'Accepted' => 'success',
+            'Rejected', 'Missing' => 'warning',
+            default => 'status',
+        };
+    }
+}

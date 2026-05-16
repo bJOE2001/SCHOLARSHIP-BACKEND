@@ -4,9 +4,12 @@ namespace Tests\Feature\Api;
 
 use App\Models\ApplicationDocument;
 use App\Models\ScholarshipApplication;
+use App\Models\ScholarshipNotification;
 use App\Models\ScholarshipProgram;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -39,6 +42,50 @@ class ScholarshipApiTest extends TestCase
             ],
         ]);
         $response->assertJsonPath('user.role', 'student');
+    }
+
+    public function test_authenticated_user_can_logout_without_server_error(): void
+    {
+        $student = User::factory()->create([
+            'name' => 'Logout Student',
+            'email' => 'logout.student@example.com',
+            'password' => 'password',
+            'role' => 'student',
+        ]);
+
+        $loginResponse = $this->postJson('/api/auth/login', [
+            'email' => $student->email,
+            'password' => 'password',
+        ]);
+        $token = $loginResponse->json('token');
+
+        $response = $this
+            ->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/auth/logout');
+
+        $response->assertNoContent();
+    }
+
+    public function test_authenticated_user_can_mark_all_notifications_read_without_server_error(): void
+    {
+        $student = User::factory()->create([
+            'name' => 'Notification Reader',
+            'email' => 'notification.reader@example.com',
+            'password' => 'password',
+            'role' => 'student',
+        ]);
+        $notification = ScholarshipNotification::factory()->create([
+            'user_id' => $student->id,
+            'role' => null,
+            'read_at' => null,
+        ]);
+
+        Sanctum::actingAs($student);
+
+        $response = $this->patchJson('/api/notifications/read-all');
+
+        $response->assertNoContent();
+        $this->assertNotNull($notification->fresh()->read_at);
     }
 
     public function test_public_program_listing_returns_open_programs(): void
@@ -123,6 +170,75 @@ class ScholarshipApiTest extends TestCase
         $response->assertJsonPath('application.status', 'Draft');
         $response->assertJsonPath('application.applicantId', $student->id);
         $this->assertDatabaseCount('application_documents', 2);
+    }
+
+    public function test_student_can_submit_application_with_uploaded_requirement_documents(): void
+    {
+        Storage::fake('local');
+
+        $student = User::factory()->create([
+            'name' => 'Submit Student',
+            'email' => 'submit.student@example.com',
+            'password' => 'password',
+            'role' => 'student',
+        ]);
+        $program = $this->createProgram('Submit Program', [
+            'requirements' => ['Certificate of Registration'],
+        ]);
+
+        Sanctum::actingAs($student);
+
+        $draftResponse = $this->postJson('/api/applications/drafts', [
+            'studentId' => $student->id,
+            'programId' => $program->id,
+        ]);
+        $applicationId = $draftResponse->json('application.id');
+
+        $this->postJson("/api/applications/{$applicationId}/documents", [
+            'requirementName' => 'Certificate of Registration',
+            'file' => UploadedFile::fake()->create('registration.pdf', 128, 'application/pdf'),
+        ])->assertCreated();
+
+        $document = ApplicationDocument::query()->where('scholarship_application_id', $applicationId)->firstOrFail();
+        Storage::disk('local')->assertExists($document->path);
+
+        $submitResponse = $this->postJson("/api/applications/{$applicationId}/submit");
+
+        $submitResponse->assertOk();
+        $submitResponse->assertJsonPath('application.status', 'Submitted');
+        $submitResponse->assertJsonPath('application.progress', 25);
+        $submitResponse->assertJsonPath('application.missingRequirements', []);
+        $this->assertNotNull(ScholarshipApplication::query()->find($applicationId)?->submitted_at);
+    }
+
+    public function test_student_cannot_submit_application_with_missing_requirement_documents(): void
+    {
+        $student = User::factory()->create([
+            'name' => 'Missing Requirement Student',
+            'email' => 'missing.requirement@example.com',
+            'password' => 'password',
+            'role' => 'student',
+        ]);
+        $program = $this->createProgram('Missing Requirement Program', [
+            'requirements' => ['Certificate of Registration'],
+        ]);
+
+        Sanctum::actingAs($student);
+
+        $draftResponse = $this->postJson('/api/applications/drafts', [
+            'studentId' => $student->id,
+            'programId' => $program->id,
+        ]);
+        $applicationId = $draftResponse->json('application.id');
+
+        $submitResponse = $this->postJson("/api/applications/{$applicationId}/submit");
+
+        $submitResponse->assertUnprocessable();
+        $submitResponse->assertJsonPath('errors.documents.0', 'Certificate of Registration');
+        $this->assertDatabaseHas('scholarship_applications', [
+            'id' => $applicationId,
+            'status' => 'Draft',
+        ]);
     }
 
     public function test_admin_can_create_user_and_assign_programs(): void

@@ -8,6 +8,7 @@ use App\Http\Resources\ScholarshipNotificationResource;
 use App\Models\ScholarshipNotification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class NotificationController extends Controller
 {
@@ -69,7 +70,7 @@ class NotificationController extends Controller
     /**
      * Mark all visible notifications as read.
      */
-    public function markAllRead(Request $request): JsonResponse
+    public function markAllRead(Request $request): Response
     {
         $this->visibleNotificationsQuery($request)->update([
             'read_at' => now(),

@@ -9,6 +9,7 @@ use App\Http\Resources\UserResource;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -72,7 +73,7 @@ class AuthController extends Controller
     /**
      * Revoke the current access token.
      */
-    public function logout(Request $request): JsonResponse
+    public function logout(Request $request): Response
     {
         $request->user()?->currentAccessToken()?->delete();
 

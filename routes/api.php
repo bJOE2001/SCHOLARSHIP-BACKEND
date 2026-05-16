@@ -30,6 +30,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/applications', [ApplicationController::class, 'index']);
     Route::post('/applications/drafts', [ApplicationController::class, 'draft']);
     Route::post('/applications/{application}/documents', [ApplicationController::class, 'storeDocument']);
+    Route::post('/applications/{application}/submit', [ApplicationController::class, 'submit']);
 
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::patch('/notifications/{notification}/read', [NotificationController::class, 'markRead']);

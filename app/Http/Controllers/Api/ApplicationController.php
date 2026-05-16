@@ -187,6 +187,57 @@ class ApplicationController extends Controller
     }
 
     /**
+     * Submit a completed student application for review.
+     */
+    public function submit(Request $request, ScholarshipApplication $application): JsonResponse
+    {
+        $currentUser = $request->user();
+
+        abort_unless(
+            $currentUser?->isAdmin() || $application->applicant_id === $currentUser?->id,
+            403,
+        );
+
+        if (! in_array($application->status, ['Draft', 'Needs Revision'], true)) {
+            return response()->json([
+                'message' => 'Only draft or revision applications can be submitted.',
+            ], 422);
+        }
+
+        $application->loadMissing(['documents', 'applicant', 'program']);
+        $missingRequirements = $this->missingUploadedRequirements($application);
+
+        if ($missingRequirements !== []) {
+            $application->syncMissingRequirements($missingRequirements);
+            $application->save();
+
+            return response()->json([
+                'message' => 'Please upload all required documents before submitting.',
+                'errors' => [
+                    'documents' => $missingRequirements,
+                ],
+            ], 422);
+        }
+
+        $remarks = 'Application submitted for review.';
+        $application->fill([
+            'status' => 'Submitted',
+            'risk_label' => $this->riskLabelForStatus('Submitted'),
+            'progress' => $this->progressForStatus('Submitted'),
+            'remarks' => $remarks,
+            'next_action' => $this->nextActionForStatus('Submitted'),
+            'missing_requirements' => [],
+            'submitted_at' => now(),
+        ]);
+        $application->appendTimelineEvent('Submitted', $remarks);
+        $application->save();
+
+        return response()->json([
+            'application' => new ScholarshipApplicationResource($application->fresh(['documents', 'applicant', 'program'])),
+        ]);
+    }
+
+    /**
      * Resolve the applications visible to the current user.
      */
     private function visibleApplicationsQuery(Request $request): Builder
@@ -219,6 +270,25 @@ class ApplicationController extends Controller
                 ],
             );
         }
+    }
+
+    /**
+     * Return program requirements that do not have an uploaded file yet.
+     *
+     * @return array<int, string>
+     */
+    private function missingUploadedRequirements(ScholarshipApplication $application): array
+    {
+        $documents = $application->documents->keyBy('name');
+
+        return collect($application->program?->requirements ?? [])
+            ->filter(function (string $requirement) use ($documents): bool {
+                $document = $documents->get($requirement);
+
+                return $document === null || $document->path === null;
+            })
+            ->values()
+            ->all();
     }
 
     /**

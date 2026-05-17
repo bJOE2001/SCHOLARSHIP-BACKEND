@@ -9,9 +9,24 @@ use App\Models\ApplicationDocument;
 use App\Models\ScholarshipApplication;
 use App\Models\ScholarshipNotification;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DocumentController extends Controller
 {
+    /**
+     * Stream one uploaded requirement file from private storage.
+     */
+    public function showFile(ApplicationDocument $document): StreamedResponse
+    {
+        abort_if($document->path === null || ! Storage::disk('local')->exists($document->path), 404);
+
+        return Storage::disk('local')->response(
+            $document->path,
+            basename($document->path),
+        );
+    }
+
     /**
      * Update one application document status.
      */

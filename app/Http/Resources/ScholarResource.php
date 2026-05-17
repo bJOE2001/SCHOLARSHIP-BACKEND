@@ -41,10 +41,27 @@ class ScholarResource extends JsonResource
             'duration' => $this->duration,
             'complianceStatus' => $this->compliance_status,
             'complianceRate' => $this->compliance_rate,
+            'riskLevel' => $this->risk_label,
             'riskLabel' => $this->risk_label,
             'riskReason' => $this->risk_reason,
+            'riskRemarks' => $this->risk_reason,
+            'officerNotes' => $this->recommended_action,
             'recommendedAction' => $this->recommended_action,
             'submissions' => $this->submissions ?? [],
+            'complianceHistory' => [
+                [
+                    'semester' => $this->semester,
+                    'status' => $this->compliance_status,
+                    'remarks' => $this->risk_reason,
+                ],
+            ],
+            'renewalHistory' => [
+                [
+                    'semester' => $this->semester,
+                    'status' => $this->renewal_status,
+                    'remarks' => $this->recommended_action,
+                ],
+            ],
             'createdAt' => $this->created_at?->toISOString(),
             'updatedAt' => $this->updated_at?->toISOString(),
         ];

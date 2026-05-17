@@ -61,6 +61,38 @@ class AuthController extends Controller
     }
 
     /**
+     * Reset a user's password back to their birthdate in MMDDYY format.
+     */
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'email' => ['required', 'email', 'string', 'max:255'],
+        ]);
+
+        $user = User::query()->where('email', $validated['email'])->first();
+        $message = 'If that email exists and has a birthdate, the password has been reset to MMDDYY.';
+
+        if ($user === null) {
+            return response()->json(['message' => $message]);
+        }
+
+        $birthdatePassword = $this->birthdatePassword($user);
+
+        if ($birthdatePassword === '') {
+            throw ValidationException::withMessages([
+                'email' => ['This account does not have a birthdate saved.'],
+            ]);
+        }
+
+        $user->forceFill([
+            'password' => $birthdatePassword,
+        ])->save();
+        $user->tokens()->delete();
+
+        return response()->json(['message' => $message]);
+    }
+
+    /**
      * Return the currently authenticated user.
      */
     public function me(Request $request): JsonResponse
@@ -123,6 +155,18 @@ class AuthController extends Controller
             'income_bracket' => $validated['incomeBracket'] ?? null,
             'assigned_program_ids' => [],
         ];
+    }
+
+    /**
+     * Convert a user's saved birthdate to MMDDYY.
+     */
+    private function birthdatePassword(User $user): string
+    {
+        if ($user->birth_date === null) {
+            return '';
+        }
+
+        return $user->birth_date->format('mdy');
     }
 
     /**

@@ -20,8 +20,10 @@ class ScholarshipApplicationResource extends JsonResource
             'applicantId' => $this->applicant_id,
             'applicationNo' => $this->application_no,
             'status' => $this->status,
+            'eligibility' => $this->eligibilityForStatus(),
+            'recommendation' => $this->recommendationForStatus(),
             'riskLabel' => $this->risk_label,
-            'score' => $this->score,
+            'score' => $this->scoreForStatus($this->status, (int) $this->score),
             'progress' => $this->progress,
             'remarks' => $this->remarks,
             'nextAction' => $this->next_action,
@@ -33,5 +35,34 @@ class ScholarshipApplicationResource extends JsonResource
             'createdAt' => $this->created_at?->toISOString(),
             'updatedAt' => $this->updated_at?->toISOString(),
         ];
+    }
+
+    private function eligibilityForStatus(): string
+    {
+        return match ($this->status) {
+            'Under Review' => 'For Evaluation',
+            'Eligible', 'Shortlisted', 'Approved', 'Accepted', 'Enrollment Verified', 'Active Scholar', 'Renewed' => 'Eligible',
+            'Rejected', 'Terminated' => 'Ineligible',
+            default => 'For Screening',
+        };
+    }
+
+    private function recommendationForStatus(): string
+    {
+        return match ($this->status) {
+            'Submitted', 'Under Review', 'For Revision', 'Resubmitted' => 'Pending',
+            'Eligible', 'Shortlisted', 'Approved', 'Active Scholar' => 'Recommended',
+            'Rejected' => 'Not Recommended',
+            default => 'Pending',
+        };
+    }
+
+    private function scoreForStatus(string $status, int $currentScore): int
+    {
+        return match ($status) {
+            'Eligible' => max($currentScore, 80),
+            'Shortlisted', 'Approved', 'Active Scholar' => max($currentScore, 90),
+            default => $currentScore,
+        };
     }
 }

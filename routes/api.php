@@ -18,6 +18,7 @@ Route::get('/health', fn () => [
 Route::prefix('auth')->group(function (): void {
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/register', [AuthController::class, 'register']);
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 });
 
 Route::get('/programs', [ProgramController::class, 'index']);
@@ -49,6 +50,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/programs/{program}/officers', [ProgramController::class, 'assignAdmins']);
 
         Route::patch('/applications/{application}/status', [ApplicationController::class, 'updateStatus']);
+        Route::get('/documents/{document}/file', [DocumentController::class, 'showFile'])->name('documents.file');
         Route::patch('/documents/{document}/status', [DocumentController::class, 'updateStatus']);
 
         Route::get('/analytics', [AnalyticsController::class, 'summary']);

@@ -57,13 +57,19 @@ class ScholarController extends Controller
     public function updateCompliance(UpdateScholarComplianceRequest $request, Scholar $scholar): JsonResponse
     {
         $validated = $request->validated();
-        $complianceStatus = $validated['complianceStatus'];
+        $complianceStatus = $this->normalizeComplianceStatus($validated['complianceStatus']);
+        $renewalStatus = $validated['renewalStatus']
+            ?? $this->mapRenewalStatus($validated['renewalEligibility'] ?? null, $scholar->renewal_status);
+        $scholarshipStatus = $validated['scholarshipStatus'] ?? $this->scholarshipStatusForRenewal($renewalStatus, $scholar->scholarship_status);
+        $riskLevel = $this->normalizeRiskLevel($validated['riskLevel'] ?? $this->riskLabelForCompliance($complianceStatus));
+        $officerNotes = $validated['officerNotes'] ?? $validated['recommendedAction'] ?? $this->recommendedActionForCompliance($complianceStatus);
 
         $scholar->update([
             'compliance_status' => $complianceStatus,
-            'renewal_status' => $this->mapRenewalStatus($validated['renewalEligibility'] ?? null),
-            'recommended_action' => $validated['recommendedAction'] ?? $this->recommendedActionForCompliance($complianceStatus),
-            'risk_label' => $this->riskLabelForCompliance($complianceStatus),
+            'renewal_status' => $renewalStatus,
+            'scholarship_status' => $scholarshipStatus,
+            'recommended_action' => $officerNotes,
+            'risk_label' => $riskLevel,
             'risk_reason' => $this->riskReasonForCompliance($complianceStatus, $scholar),
             'compliance_rate' => $this->complianceRateForStatus($complianceStatus),
         ]);
@@ -103,14 +109,64 @@ class ScholarController extends Controller
     /**
      * Map compliance decisions to renewal status values.
      */
-    private function mapRenewalStatus(?string $renewalEligibility): string
+    private function mapRenewalStatus(?string $renewalEligibility, ?string $currentStatus = null): string
     {
         return match ($renewalEligibility) {
-            'Eligible for Renewal' => 'Renewal Pending',
-            'Under Evaluation' => 'Under Evaluation',
-            'Needs Review' => 'Renewal Pending',
-            'Renewal Denied' => 'Terminated',
-            default => 'Active',
+            'Eligible for Renewal' => 'Pending Renewal',
+            'Under Evaluation' => 'Under Renewal Review',
+            'Needs Review' => 'Pending Renewal',
+            'Renewal Denied' => 'Suspended',
+            default => $this->normalizeRenewalStatus($currentStatus ?: 'Active Scholar'),
+        };
+    }
+
+    /**
+     * Normalize old and new compliance labels.
+     */
+    private function normalizeComplianceStatus(string $complianceStatus): string
+    {
+        return match ($complianceStatus) {
+            'Complete' => 'Compliant',
+            'Pending Review', 'Missing Requirements' => 'Incomplete',
+            default => $complianceStatus,
+        };
+    }
+
+    /**
+     * Normalize old and new renewal labels.
+     */
+    private function normalizeRenewalStatus(string $renewalStatus): string
+    {
+        return match ($renewalStatus) {
+            'Active' => 'Active Scholar',
+            'Renewal Pending' => 'Pending Renewal',
+            'Under Evaluation', 'Under Review' => 'Under Renewal Review',
+            default => $renewalStatus,
+        };
+    }
+
+    /**
+     * Determine the scholar status that should be visible to monitoring.
+     */
+    private function scholarshipStatusForRenewal(string $renewalStatus, ?string $currentStatus): string
+    {
+        if (in_array($renewalStatus, ['Probation', 'Suspended'], true)) {
+            return $renewalStatus;
+        }
+
+        return $this->normalizeRenewalStatus($currentStatus ?: 'Active Scholar');
+    }
+
+    /**
+     * Normalize old risk labels to the monitoring labels.
+     */
+    private function normalizeRiskLevel(string $riskLevel): string
+    {
+        return match ($riskLevel) {
+            'Stable' => 'Low Risk',
+            'Borderline' => 'Medium Risk',
+            'At Risk', 'Critical' => 'High Risk',
+            default => $riskLevel,
         };
     }
 
@@ -120,10 +176,10 @@ class ScholarController extends Controller
     private function riskLabelForCompliance(string $complianceStatus): string
     {
         return match ($complianceStatus) {
-            'Non-Compliant' => 'Critical',
-            'Missing Requirements' => 'At Risk',
-            'Pending Review' => 'Borderline',
-            default => 'Stable',
+            'Compliant' => 'Low Risk',
+            'Late Submission', 'Incomplete' => 'Medium Risk',
+            'Non-Compliant' => 'High Risk',
+            default => 'Medium Risk',
         };
     }
 
@@ -134,8 +190,8 @@ class ScholarController extends Controller
     {
         return match ($complianceStatus) {
             'Non-Compliant' => 'Scholar is not compliant with the current monitoring cycle.',
-            'Missing Requirements' => 'One or more required documents are still outstanding.',
-            'Pending Review' => 'Compliance review is still in progress.',
+            'Incomplete' => 'One or more required documents are still outstanding.',
+            'Late Submission' => 'Scholar submitted requirements after the expected deadline.',
             default => 'Scholar remains in good standing.',
         };
     }
@@ -146,9 +202,9 @@ class ScholarController extends Controller
     private function complianceRateForStatus(string $complianceStatus): int
     {
         return match ($complianceStatus) {
-            'Complete' => 100,
-            'Pending Review' => 75,
-            'Missing Requirements' => 55,
+            'Compliant' => 100,
+            'Late Submission' => 75,
+            'Incomplete' => 55,
             'Non-Compliant' => 30,
             default => 80,
         };
@@ -160,10 +216,10 @@ class ScholarController extends Controller
     private function recommendedActionForCompliance(string $complianceStatus): string
     {
         return match ($complianceStatus) {
-            'Complete' => 'Continue normal scholarship monitoring.',
-            'Pending Review' => 'Follow up after the next review cycle.',
-            'Missing Requirements' => 'Request the missing requirements from the scholar.',
-            'Non-Compliant' => 'Escalate for scholarship review.',
+            'Compliant' => 'Continue normal scholarship monitoring.',
+            'Late Submission' => 'Monitor the scholar for repeated late submissions.',
+            'Incomplete' => 'Request the missing requirements from the scholar.',
+            'Non-Compliant' => 'Recommend suspension or escalation for scholarship review.',
             default => 'Monitor the scholar closely.',
         };
     }

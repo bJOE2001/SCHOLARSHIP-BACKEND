@@ -24,8 +24,12 @@ class UpdateScholarComplianceRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'complianceStatus' => ['required', Rule::in(['Complete', 'Pending Review', 'Missing Requirements', 'Non-Compliant'])],
+            'complianceStatus' => ['required', Rule::in(['Compliant', 'Incomplete', 'Late Submission', 'Non-Compliant', 'Complete', 'Pending Review', 'Missing Requirements'])],
+            'riskLevel' => ['nullable', Rule::in(['Low Risk', 'Medium Risk', 'High Risk', 'Stable', 'Borderline', 'At Risk', 'Critical'])],
+            'scholarshipStatus' => ['nullable', Rule::in(['Active Scholar', 'Pending Renewal', 'Under Renewal Review', 'Probation', 'Suspended', 'Active'])],
+            'renewalStatus' => ['nullable', Rule::in(['Active Scholar', 'Pending Renewal', 'Under Renewal Review', 'Probation', 'Suspended', 'Active', 'Renewal Pending', 'Under Evaluation'])],
             'renewalEligibility' => ['nullable', 'string', 'max:255'],
+            'officerNotes' => ['nullable', 'string'],
             'recommendedAction' => ['nullable', 'string'],
         ];
     }

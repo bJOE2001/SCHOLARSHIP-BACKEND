@@ -20,6 +20,7 @@ class ApplicationDocumentResource extends JsonResource
             'name' => $this->name,
             'type' => $this->type,
             'path' => $this->path,
+            'fileUrl' => $this->path ? route('documents.file', $this->id) : null,
             'status' => $this->status,
             'remarks' => $this->remarks,
             'uploadedById' => $this->uploaded_by_id,

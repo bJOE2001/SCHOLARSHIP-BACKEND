@@ -101,6 +101,7 @@ class ApplicationController extends Controller
             'remarks' => $validated['remarks'] ?? $application->remarks,
             'next_action' => $this->nextActionForStatus($validated['status']),
             'progress' => $this->progressForStatus($validated['status']),
+            'score' => $this->scoreForStatus($validated['status'], (int) $application->score),
             'risk_label' => $this->riskLabelForStatus($validated['status']),
             'reviewed_by_id' => $currentUser?->id,
             'reviewed_at' => now(),
@@ -198,7 +199,7 @@ class ApplicationController extends Controller
             403,
         );
 
-        if (! in_array($application->status, ['Draft', 'Needs Revision'], true)) {
+        if (! in_array($application->status, ['Draft', 'For Revision', 'Needs Revision'], true)) {
             return response()->json([
                 'message' => 'Only draft or revision applications can be submitted.',
             ], 422);
@@ -219,17 +220,18 @@ class ApplicationController extends Controller
             ], 422);
         }
 
+        $nextStatus = in_array($application->status, ['For Revision', 'Needs Revision'], true) ? 'Resubmitted' : 'Submitted';
         $remarks = 'Application submitted for review.';
         $application->fill([
-            'status' => 'Submitted',
-            'risk_label' => $this->riskLabelForStatus('Submitted'),
-            'progress' => $this->progressForStatus('Submitted'),
+            'status' => $nextStatus,
+            'risk_label' => $this->riskLabelForStatus($nextStatus),
+            'progress' => $this->progressForStatus($nextStatus),
             'remarks' => $remarks,
-            'next_action' => $this->nextActionForStatus('Submitted'),
+            'next_action' => $this->nextActionForStatus($nextStatus),
             'missing_requirements' => [],
             'submitted_at' => now(),
         ]);
-        $application->appendTimelineEvent('Submitted', $remarks);
+        $application->appendTimelineEvent($nextStatus, $remarks);
         $application->save();
 
         return response()->json([
@@ -343,7 +345,7 @@ class ApplicationController extends Controller
                 'enrollment_status' => $applicant->enrollment_status,
                 'academic_year' => $applicant->academic_year,
                 'semester' => $applicant->semester,
-                'scholarship_status' => 'Active',
+                'scholarship_status' => 'Active Scholar',
                 'renewal_status' => $this->renewalStatusForApplication($application->status),
                 'date_approved' => now(),
                 'duration' => '1 Academic Year',
@@ -411,6 +413,10 @@ class ApplicationController extends Controller
             'Accepted',
             'Enrollment Verified',
             'Active Scholar',
+            'Pending Renewal',
+            'Under Renewal Review',
+            'Probation',
+            'Suspended',
             'Renewal Pending',
             'Renewed',
         ];
@@ -424,16 +430,35 @@ class ApplicationController extends Controller
         return match ($status) {
             'Draft' => 0,
             'Submitted' => 25,
-            'Under Review' => 45,
-            'Needs Revision' => 55,
-            'Accepted' => 80,
-            'Rejected' => 100,
+            'Under Review' => 50,
+            'Eligible' => 75,
+            'Shortlisted' => 90,
+            'Approved' => 100,
+            'Rejected' => 0,
+            'For Revision', 'Needs Revision' => 35,
+            'Resubmitted' => 40,
+            'Accepted' => 100,
             'Enrollment Verified' => 90,
             'Active Scholar' => 100,
-            'Renewal Pending' => 95,
+            'Pending Renewal', 'Renewal Pending' => 95,
+            'Under Renewal Review' => 95,
+            'Probation', 'Suspended' => 100,
             'Renewed' => 100,
             'Terminated' => 100,
             default => 50,
+        };
+    }
+
+    /**
+     * Keep a reasonable evaluation score in sync with review milestones.
+     */
+    private function scoreForStatus(string $status, int $currentScore): int
+    {
+        return match ($status) {
+            'Eligible' => max($currentScore, 80),
+            'Shortlisted', 'Approved' => max($currentScore, 90),
+            'Rejected' => $currentScore,
+            default => $currentScore,
         };
     }
 
@@ -443,10 +468,11 @@ class ApplicationController extends Controller
     private function riskLabelForStatus(string $status): string
     {
         return match ($status) {
-            'Rejected', 'Terminated' => 'Critical',
-            'Needs Revision' => 'At Risk',
-            'Submitted', 'Under Review', 'Renewal Pending' => 'Borderline',
-            default => 'Stable',
+            'Rejected', 'Terminated', 'Suspended' => 'High Risk',
+            'Probation' => 'Medium Risk',
+            'For Revision', 'Needs Revision' => 'At Risk',
+            'Submitted', 'Resubmitted', 'Under Review', 'Renewal Pending', 'Pending Renewal', 'Under Renewal Review' => 'Medium Risk',
+            default => 'Low Risk',
         };
     }
 
@@ -456,10 +482,11 @@ class ApplicationController extends Controller
     private function complianceStatusForApplication(string $status): string
     {
         return match ($status) {
-            'Rejected', 'Terminated' => 'Non-Compliant',
-            'Needs Revision' => 'Missing Requirements',
-            'Submitted', 'Under Review' => 'Pending Review',
-            default => 'Complete',
+            'Rejected', 'Terminated', 'Suspended' => 'Non-Compliant',
+            'For Revision', 'Needs Revision' => 'Incomplete',
+            'Submitted', 'Resubmitted', 'Under Review', 'Under Renewal Review' => 'Incomplete',
+            'Renewal Pending', 'Pending Renewal', 'Probation' => 'Late Submission',
+            default => 'Compliant',
         };
     }
 
@@ -470,10 +497,13 @@ class ApplicationController extends Controller
     {
         return match ($status) {
             'Renewed' => 'Renewed',
-            'Renewal Pending' => 'Renewal Pending',
+            'Pending Renewal', 'Renewal Pending' => 'Pending Renewal',
+            'Under Renewal Review' => 'Under Renewal Review',
+            'Probation' => 'Probation',
+            'Suspended' => 'Suspended',
             'Terminated' => 'Terminated',
-            'Enrollment Verified' => 'Under Evaluation',
-            default => 'Active',
+            'Enrollment Verified' => 'Under Renewal Review',
+            default => 'Active Scholar',
         };
     }
 
@@ -484,13 +514,20 @@ class ApplicationController extends Controller
     {
         return match ($status) {
             'Submitted' => 'Wait for initial screening.',
+            'Resubmitted' => 'Review resubmitted requirements.',
             'Under Review' => 'Review documents and compute scores.',
-            'Needs Revision' => 'Ask the student to resubmit requirements.',
+            'Eligible' => 'Shortlist the applicant when ready.',
+            'Shortlisted' => 'Prepare final scholarship approval.',
+            'Approved' => 'Scholar approved successfully.',
+            'For Revision', 'Needs Revision' => 'Ask the student to resubmit requirements.',
             'Accepted' => 'Prepare award and enrollment verification.',
             'Rejected' => 'Notify the applicant of the decision.',
             'Enrollment Verified' => 'Onboard the scholar to active monitoring.',
             'Active Scholar' => 'Continue compliance monitoring.',
-            'Renewal Pending' => 'Collect renewal requirements.',
+            'Pending Renewal', 'Renewal Pending' => 'Collect renewal requirements.',
+            'Under Renewal Review' => 'Review renewal requirements.',
+            'Probation' => 'Monitor the scholar under probation.',
+            'Suspended' => 'Review the suspension recommendation.',
             'Renewed' => 'Keep the scholar under renewal monitoring.',
             'Terminated' => 'Close the case and archive the record.',
             default => 'Continue reviewing the application.',
@@ -504,7 +541,7 @@ class ApplicationController extends Controller
     {
         return match ($application->status) {
             'Rejected', 'Terminated' => 'Application was not approved.',
-            'Needs Revision' => 'Requirements are still incomplete.',
+            'For Revision', 'Needs Revision' => 'Requirements are still incomplete.',
             'Under Review' => 'Application is under active review.',
             'Renewal Pending' => 'Scholar is waiting for renewal verification.',
             default => 'Scholarship record is in a healthy state.',
@@ -545,8 +582,8 @@ class ApplicationController extends Controller
     private function notificationTypeForStatus(string $status): string
     {
         return match ($status) {
-            'Accepted', 'Enrollment Verified', 'Active Scholar', 'Renewed' => 'success',
-            'Needs Revision', 'Renewal Pending' => 'task',
+            'Approved', 'Accepted', 'Enrollment Verified', 'Active Scholar', 'Renewed' => 'success',
+            'For Revision', 'Needs Revision', 'Renewal Pending' => 'task',
             'Rejected', 'Terminated' => 'warning',
             default => 'status',
         };

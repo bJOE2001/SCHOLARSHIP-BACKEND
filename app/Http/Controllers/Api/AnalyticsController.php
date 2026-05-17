@@ -42,7 +42,7 @@ class AnalyticsController extends Controller
      */
     private function buildTrend(iterable $applications, iterable $scholars): array
     {
-        $approvedStatuses = ['Accepted', 'Enrollment Verified', 'Active Scholar', 'Renewed'];
+        $approvedStatuses = ['Approved', 'Accepted', 'Enrollment Verified', 'Active Scholar', 'Renewed'];
 
         return collect(range(5, 0))
             ->map(function (int $monthsAgo) use ($applications, $approvedStatuses): array {

@@ -410,6 +410,7 @@ class ApplicationController extends Controller
     private function activeStatuses(): array
     {
         return [
+            'Approved',
             'Accepted',
             'Enrollment Verified',
             'Active Scholar',

@@ -14,6 +14,13 @@ class ScholarResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $submissions = $this->submissions ?? [];
+        $encodedGradesSubmission = $this->submissionFor($submissions, 'encoded-grades');
+        $encodedGrades = $encodedGradesSubmission['grades']
+            ?? $encodedGradesSubmission['gradeRows']
+            ?? $encodedGradesSubmission['encodedGrades']
+            ?? [];
+
         return [
             'id' => $this->id,
             'userId' => $this->user_id,
@@ -47,7 +54,14 @@ class ScholarResource extends JsonResource
             'riskRemarks' => $this->risk_reason,
             'officerNotes' => $this->recommended_action,
             'recommendedAction' => $this->recommended_action,
-            'submissions' => $this->submissions ?? [],
+            'submissions' => $submissions,
+            'coeStatus' => $this->submissionStatus($submissions, 'coe'),
+            'corStatus' => $this->submissionStatus($submissions, 'cor'),
+            'gradesStatus' => $this->submissionStatus($submissions, 'encoded-grades'),
+            'grades' => $encodedGrades,
+            'gradeRows' => $encodedGrades,
+            'encodedGrades' => $encodedGrades,
+            'semesterSubmissionStatus' => $encodedGradesSubmission['status'] ?? null,
             'complianceHistory' => [
                 [
                     'semester' => $this->semester,
@@ -65,5 +79,34 @@ class ScholarResource extends JsonResource
             'createdAt' => $this->created_at?->toISOString(),
             'updatedAt' => $this->updated_at?->toISOString(),
         ];
+    }
+
+    /**
+     * Find a saved semester submission entry by stable key.
+     *
+     * @param array<int, array<string, mixed>> $submissions
+     * @return array<string, mixed>
+     */
+    private function submissionFor(array $submissions, string $key): array
+    {
+        foreach ($submissions as $submission) {
+            $submissionKey = $submission['key'] ?? str($submission['requirement'] ?? $submission['name'] ?? '')->lower()->slug('-')->toString();
+
+            if ($submissionKey === $key) {
+                return $submission;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Return the saved status for one semester requirement.
+     *
+     * @param array<int, array<string, mixed>> $submissions
+     */
+    private function submissionStatus(array $submissions, string $key): ?string
+    {
+        return $this->submissionFor($submissions, $key)['status'] ?? null;
     }
 }

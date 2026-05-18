@@ -37,6 +37,10 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::patch('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
     Route::patch('/notifications/read-all', [NotificationController::class, 'markAllRead']);
 
+    Route::get('/scholars', [ScholarController::class, 'index']);
+    Route::get('/scholars/{scholar}', [ScholarController::class, 'show']);
+    Route::post('/scholars/{scholar}/semester-requirements', [ScholarController::class, 'submitSemesterRequirements']);
+
     Route::middleware('role:admin,officer')->group(function (): void {
         Route::post('/notifications', [NotificationController::class, 'store']);
 
@@ -56,8 +60,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
         Route::get('/analytics', [AnalyticsController::class, 'summary']);
         Route::get('/reports', [AnalyticsController::class, 'summary']);
 
-        Route::get('/scholars', [ScholarController::class, 'index']);
-        Route::get('/scholars/{scholar}', [ScholarController::class, 'show']);
+        Route::post('/scholars/semester-requirements/require-all', [ScholarController::class, 'requireSemesterRequirementsForAll']);
         Route::patch('/scholars/{scholar}/compliance', [ScholarController::class, 'updateCompliance']);
         Route::post('/scholars/{scholar}/requirement-requests', [ScholarController::class, 'sendRequirementRequest']);
     });

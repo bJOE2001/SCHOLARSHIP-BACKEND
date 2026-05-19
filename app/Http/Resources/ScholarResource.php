@@ -14,9 +14,12 @@ class ScholarResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        $submissions = $this->submissions ?? [];
+        $complianceSubmissions = $this->whenLoaded('complianceSubmissions', fn () => $this->complianceSubmissions, collect());
+        $latestComplianceSubmission = $complianceSubmissions->first();
+        $submissions = $latestComplianceSubmission?->submissions ?? $this->submissions ?? [];
         $encodedGradesSubmission = $this->submissionFor($submissions, 'encoded-grades');
-        $encodedGrades = $encodedGradesSubmission['grades']
+        $encodedGrades = $latestComplianceSubmission?->grades
+            ?? $encodedGradesSubmission['grades']
             ?? $encodedGradesSubmission['gradeRows']
             ?? $encodedGradesSubmission['encodedGrades']
             ?? [];
@@ -61,14 +64,18 @@ class ScholarResource extends JsonResource
             'grades' => $encodedGrades,
             'gradeRows' => $encodedGrades,
             'encodedGrades' => $encodedGrades,
-            'semesterSubmissionStatus' => $encodedGradesSubmission['status'] ?? null,
-            'complianceHistory' => [
-                [
-                    'semester' => $this->semester,
-                    'status' => $this->compliance_status,
-                    'remarks' => $this->risk_reason,
+            'semesterSubmissionStatus' => $latestComplianceSubmission?->status ?? $encodedGradesSubmission['status'] ?? null,
+            'latestComplianceSubmission' => $latestComplianceSubmission ? $this->complianceSubmissionPayload($latestComplianceSubmission) : null,
+            'complianceHistory' => $complianceSubmissions->isNotEmpty()
+                ? $complianceSubmissions->map(fn ($submission): array => $this->complianceSubmissionPayload($submission))->values()->all()
+                : [
+                    [
+                        'semester' => $this->semester,
+                        'status' => $this->compliance_status,
+                        'remarks' => $this->risk_reason,
+                        'date' => $this->updated_at?->toISOString(),
+                    ],
                 ],
-            ],
             'renewalHistory' => [
                 [
                     'semester' => $this->semester,
@@ -81,6 +88,35 @@ class ScholarResource extends JsonResource
         ];
     }
 
+    /**
+     * Build frontend payload for one compliance submission row.
+     *
+     * @return array<string, mixed>
+     */
+    private function complianceSubmissionPayload($submission): array
+    {
+        return [
+            'id' => $submission->id,
+            'semester' => $submission->semester,
+            'academicYear' => $submission->academic_year,
+            'status' => $submission->status,
+            'coeStatus' => $submission->coe_status,
+            'corStatus' => $submission->cor_status,
+            'gradesStatus' => $submission->grades_status,
+            'gpa' => $submission->gpa,
+            'submissions' => $submission->submissions ?? [],
+            'grades' => $submission->grades ?? [],
+            'gradeRows' => $submission->grades ?? [],
+            'encodedGrades' => $submission->grades ?? [],
+            'remarks' => $submission->officer_notes,
+            'officerNotes' => $submission->officer_notes,
+            'submittedAt' => $submission->submitted_at?->toISOString(),
+            'reviewedAt' => $submission->reviewed_at?->toISOString(),
+            'date' => ($submission->reviewed_at ?? $submission->submitted_at ?? $submission->created_at)?->toISOString(),
+            'createdAt' => $submission->created_at?->toISOString(),
+            'updatedAt' => $submission->updated_at?->toISOString(),
+        ];
+    }
     /**
      * Find a saved semester submission entry by stable key.
      *

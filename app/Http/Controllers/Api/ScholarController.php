@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreRequirementRequest;
 use App\Http\Requests\UpdateScholarComplianceRequest;
 use App\Http\Resources\ScholarResource;
+use App\Models\ApplicationDocument;
 use App\Models\Scholar;
+use App\Models\ScholarComplianceSubmission;
 use App\Models\ScholarshipApplication;
 use App\Models\ScholarshipNotification;
 use Illuminate\Http\JsonResponse;
@@ -27,6 +29,7 @@ class ScholarController extends Controller
         $renewalStatus = $request->query('renewalStatus');
 
         $scholars = Scholar::query()
+            ->with(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])
             ->when(! ($currentUser?->isAdmin() ?? false), fn ($query) => $query->where('user_id', $currentUser?->id))
             ->when($riskLabel !== null && $riskLabel !== '', fn ($query) => $query->where('risk_label', $riskLabel))
             ->when($renewalStatus !== null && $renewalStatus !== '', fn ($query) => $query->where('renewal_status', $renewalStatus))
@@ -54,7 +57,7 @@ class ScholarController extends Controller
         abort_unless(request()->user()?->isAdmin() || $scholar->user_id === request()->user()?->id, 403);
 
         return response()->json([
-            'scholar' => new ScholarResource($scholar),
+            'scholar' => new ScholarResource($scholar->loadMissing(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])),
         ]);
     }
 
@@ -78,6 +81,13 @@ class ScholarController extends Controller
         $riskLevel = $this->normalizeRiskLevel($validated['riskLevel'] ?? $this->riskLabelForCompliance($complianceStatus));
         $officerNotes = $validated['officerNotes'] ?? $validated['recommendedAction'] ?? $this->recommendedActionForCompliance($complianceStatus);
 
+        $updatedSubmissions = $this->updateRequirementStatuses(
+            $this->latestComplianceSubmissions($scholar),
+            $validated['coeStatus'] ?? null,
+            $validated['corStatus'] ?? null,
+            $validated['gradesStatus'] ?? null,
+        );
+
         $scholar->update([
             'compliance_status' => $complianceStatus,
             'renewal_status' => $renewalStatus,
@@ -86,19 +96,26 @@ class ScholarController extends Controller
             'risk_label' => $riskLevel,
             'risk_reason' => $this->riskReasonForCompliance($complianceStatus, $scholar),
             'compliance_rate' => $this->complianceRateForStatus($complianceStatus),
-            'submissions' => $this->updateRequirementStatuses(
-                $scholar->submissions ?? [],
-                $validated['coeStatus'] ?? null,
-                $validated['corStatus'] ?? null,
-                $validated['gradesStatus'] ?? null,
-            ),
+            'submissions' => $updatedSubmissions,
         ]);
 
-        $scholar->refresh();
+        $this->latestOrCreateComplianceSubmission($scholar)->update([
+            'status' => $complianceStatus,
+            'coe_status' => $this->submissionStatusFromList($updatedSubmissions, 'coe') ?? 'Missing',
+            'cor_status' => $this->submissionStatusFromList($updatedSubmissions, 'cor') ?? 'Missing',
+            'grades_status' => $this->submissionStatusFromList($updatedSubmissions, 'encoded-grades') ?? 'Missing',
+            'gpa' => $scholar->gpa,
+            'submissions' => $updatedSubmissions,
+            'grades' => $this->gradesFromSubmissions($updatedSubmissions),
+            'officer_notes' => $officerNotes,
+            'reviewed_at' => now(),
+        ]);
+
+        $scholar->refresh()->loadMissing(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()]);
         $this->notifyScholarOfComplianceUpdate($scholar, $original, $officerNotes);
 
         return response()->json([
-            'scholar' => new ScholarResource($scholar),
+            'scholar' => new ScholarResource($scholar->loadMissing(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])),
         ]);
     }
 
@@ -125,12 +142,29 @@ class ScholarController extends Controller
 
         $grades = $this->normalizeGradeRows($validated['grades']);
         $average = $validated['gpa'] ?? $this->computeAverage($grades);
-        $submissions = $this->saveEncodedGradesSubmission(
-            $scholar->submissions ?? [],
+        $submittedAt = now();
+        $submissions = $this->buildComplianceSubmissionEntries(
+            $scholar,
             $grades,
             $average,
             $validated['semesterSubmissionStatus'] ?? 'Submitted',
+            $submittedAt->toISOString(),
         );
+
+        ScholarComplianceSubmission::create([
+            'scholar_id' => $scholar->id,
+            'scholarship_application_id' => $scholar->scholarship_application_id,
+            'semester' => $scholar->semester,
+            'academic_year' => $scholar->academic_year,
+            'status' => 'Under Review',
+            'coe_status' => $this->submissionStatusFromList($submissions, 'coe') ?? 'Submitted',
+            'cor_status' => $this->submissionStatusFromList($submissions, 'cor') ?? 'Submitted',
+            'grades_status' => $validated['semesterSubmissionStatus'] ?? 'Submitted',
+            'gpa' => $average,
+            'submissions' => $submissions,
+            'grades' => $grades,
+            'submitted_at' => $submittedAt,
+        ]);
 
         $scholar->update([
             'gpa' => $average ?: $scholar->gpa,
@@ -145,7 +179,7 @@ class ScholarController extends Controller
         ]);
 
         return response()->json([
-            'scholar' => new ScholarResource($scholar->refresh()),
+            'scholar' => new ScholarResource($scholar->refresh()->loadMissing(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])),
         ]);
     }
 
@@ -190,7 +224,7 @@ class ScholarController extends Controller
 
         return response()->json([
             'message' => 'Semester requirements requested for active scholars.',
-            'scholars' => ScholarResource::collection($scholars->fresh()),
+            'scholars' => ScholarResource::collection($scholars->fresh()->load(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])),
         ]);
     }
 
@@ -244,6 +278,7 @@ class ScholarController extends Controller
             'Complete' => 'Compliant',
             'Pending Review' => 'Under Review',
             'Pending Compliance', 'Missing Requirements' => 'Incomplete',
+            'Not Yet Submitted' => 'Pending Compliance',
             default => $complianceStatus,
         };
     }
@@ -713,6 +748,143 @@ class ScholarController extends Controller
         ];
     }
 
+    /**
+     * Build a fresh compliance row payload from current uploads and encoded grades.
+     *
+     * @param array<int, array<string, mixed>> $grades
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildComplianceSubmissionEntries(Scholar $scholar, array $grades, ?float $average, string $status, string $submittedAt): array
+    {
+        $documents = ApplicationDocument::query()
+            ->where('scholarship_application_id', $scholar->scholarship_application_id)
+            ->whereIn('name', ['Certificate of Enrollment / COE', 'Certificate of Registration / COR'])
+            ->get()
+            ->keyBy('name');
+
+        $coe = $documents->get('Certificate of Enrollment / COE');
+        $cor = $documents->get('Certificate of Registration / COR');
+
+        return [
+            $this->documentSubmissionEntry('coe', 'Certificate of Enrollment / COE', $coe, $submittedAt),
+            $this->documentSubmissionEntry('cor', 'Certificate of Registration / COR', $cor, $submittedAt),
+            [
+                'key' => 'encoded-grades',
+                'requirement' => 'Encoded Grades',
+                'name' => 'Encoded Grades',
+                'status' => $status,
+                'submittedAt' => $submittedAt,
+                'grades' => $grades,
+                'gradeRows' => $grades,
+                'encodedGrades' => $grades,
+                'gpa' => $average,
+            ],
+        ];
+    }
+
+    /**
+     * Convert a document upload to the submission shape consumed by the frontend.
+     *
+     * @return array<string, mixed>
+     */
+    private function documentSubmissionEntry(string $key, string $name, ?ApplicationDocument $document, string $submittedAt): array
+    {
+        return array_filter([
+            'key' => $key,
+            'requirement' => $name,
+            'name' => $name,
+            'status' => $document?->status ?? 'Missing',
+            'submittedAt' => $document?->uploaded_at?->toISOString() ?? $submittedAt,
+            'document' => $document ? [
+                'id' => $document->id,
+                'applicationId' => $document->scholarship_application_id,
+                'name' => $document->name,
+                'fileName' => $document->name,
+                'type' => $document->type,
+                'path' => $document->path,
+                'fileUrl' => $document->path ? route('documents.file', $document->id) : null,
+                'status' => $document->status,
+                'remarks' => $document->remarks,
+                'uploadedAt' => $document->uploaded_at?->toISOString(),
+            ] : null,
+        ], fn ($value): bool => $value !== null);
+    }
+
+    /**
+     * Return latest row submissions, falling back to the legacy scholar JSON.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function latestComplianceSubmissions(Scholar $scholar): array
+    {
+        $latestSubmission = $scholar->complianceSubmissions()->latest('submitted_at')->latest()->first();
+
+        return $latestSubmission?->submissions ?? $scholar->submissions ?? [];
+    }
+
+    /**
+     * Get the latest compliance row or create one when an officer reviews before a student row exists.
+     */
+    private function latestOrCreateComplianceSubmission(Scholar $scholar): ScholarComplianceSubmission
+    {
+        $latestSubmission = $scholar->complianceSubmissions()->latest('submitted_at')->latest()->first();
+
+        if ($latestSubmission !== null) {
+            return $latestSubmission;
+        }
+
+        return ScholarComplianceSubmission::create([
+            'scholar_id' => $scholar->id,
+            'scholarship_application_id' => $scholar->scholarship_application_id,
+            'semester' => $scholar->semester,
+            'academic_year' => $scholar->academic_year,
+            'status' => $scholar->compliance_status ?: 'Pending Compliance',
+            'coe_status' => $this->submissionStatusFromList($scholar->submissions ?? [], 'coe') ?? 'Missing',
+            'cor_status' => $this->submissionStatusFromList($scholar->submissions ?? [], 'cor') ?? 'Missing',
+            'grades_status' => $this->submissionStatusFromList($scholar->submissions ?? [], 'encoded-grades') ?? 'Missing',
+            'gpa' => $scholar->gpa,
+            'submissions' => $scholar->submissions ?? [],
+            'grades' => $this->gradesFromSubmissions($scholar->submissions ?? []),
+            'submitted_at' => now(),
+        ]);
+    }
+
+    /**
+     * Return a requirement status from a normalized submission list.
+     *
+     * @param array<int, array<string, mixed>> $submissions
+     */
+    private function submissionStatusFromList(array $submissions, string $key): ?string
+    {
+        foreach ($submissions as $submission) {
+            $submissionKey = $submission['key'] ?? str($submission['requirement'] ?? $submission['name'] ?? '')->lower()->slug('-')->toString();
+
+            if ($submissionKey === $key) {
+                return $submission['status'] ?? null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Pull encoded grade rows from a submission list.
+     *
+     * @param array<int, array<string, mixed>> $submissions
+     * @return array<int, array<string, mixed>>
+     */
+    private function gradesFromSubmissions(array $submissions): array
+    {
+        foreach ($submissions as $submission) {
+            $submissionKey = $submission['key'] ?? str($submission['requirement'] ?? $submission['name'] ?? '')->lower()->slug('-')->toString();
+
+            if ($submissionKey === 'encoded-grades') {
+                return $submission['grades'] ?? $submission['gradeRows'] ?? $submission['encodedGrades'] ?? [];
+            }
+        }
+
+        return [];
+    }
     /**
      * Merge a submission entry by key or requirement name.
      *

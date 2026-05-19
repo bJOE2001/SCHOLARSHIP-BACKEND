@@ -6,6 +6,7 @@ use Database\Factories\ScholarFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Scholar extends Model
 {
@@ -94,4 +95,15 @@ class Scholar extends Model
     {
         return $this->belongsTo(ScholarshipApplication::class, 'scholarship_application_id');
     }
+
+    /**
+     * Get semester compliance submissions for this scholar.
+     *
+     * @return HasMany<ScholarComplianceSubmission, $this>
+     */
+    public function complianceSubmissions(): HasMany
+    {
+        return $this->hasMany(ScholarComplianceSubmission::class);
+    }
 }
+

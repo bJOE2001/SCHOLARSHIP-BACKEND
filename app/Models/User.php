@@ -138,11 +138,27 @@ class User extends Authenticatable
     }
 
     /**
+     * Determine whether the user can access every scholarship program.
+     */
+    public function isSuperAdmin(): bool
+    {
+        return $this->role === 'admin';
+    }
+
+    /**
      * Determine whether the user is a student.
      */
     public function isStudent(): bool
     {
         return $this->role === 'student';
+    }
+
+    /**
+     * Determine whether the user is a scholarship officer.
+     */
+    public function isOfficer(): bool
+    {
+        return $this->role === 'officer';
     }
 
     /**

@@ -95,7 +95,7 @@ class UserFactory extends Factory
     public function admin(): static
     {
         return $this->state(fn (array $attributes) => [
-            'role' => 'officer',
+            'role' => 'admin',
             'status' => 'Active',
             'department' => fake()->randomElement([
                 'Scholarship Administration',

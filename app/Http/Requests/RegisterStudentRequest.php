@@ -26,6 +26,7 @@ class RegisterStudentRequest extends FormRequest
         return [
             'fullName' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'string', 'max:255', Rule::unique('users', 'email')],
+            'password' => ['nullable', 'string', 'min:6', 'max:255'],
             'gender' => ['nullable', 'string', 'max:50'],
             'birthDate' => ['nullable', 'date'],
             'civilStatus' => ['nullable', 'string', 'max:50'],
@@ -42,7 +43,7 @@ class RegisterStudentRequest extends FormRequest
             'yearLevel' => ['nullable', 'string', 'max:50'],
             'semester' => ['nullable', 'string', 'max:50'],
             'academicYear' => ['nullable', 'string', 'max:50'],
-            'gpa' => ['nullable', 'numeric', 'min:0', 'max:4'],
+            'gpa' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'enrollmentStatus' => ['nullable', 'string', 'max:100'],
             'academicAwards' => ['nullable', 'string'],
             'fatherName' => ['nullable', 'string', 'max:255'],

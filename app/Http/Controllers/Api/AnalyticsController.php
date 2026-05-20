@@ -16,9 +16,16 @@ class AnalyticsController extends Controller
      */
     public function summary(Request $request): JsonResponse
     {
-        $programs = ScholarshipProgram::query()->get();
-        $applications = ScholarshipApplication::query()->get();
-        $scholars = Scholar::query()->get();
+        $programIds = $this->visibleProgramIds($request);
+        $programs = ScholarshipProgram::query()
+            ->when($programIds !== null, fn ($query) => $query->whereIn('id', $programIds))
+            ->get();
+        $applications = ScholarshipApplication::query()
+            ->when($programIds !== null, fn ($query) => $query->whereIn('scholarship_program_id', $programIds))
+            ->get();
+        $scholars = Scholar::query()
+            ->when($programIds !== null, fn ($query) => $query->whereIn('scholarship_program_id', $programIds))
+            ->get();
 
         return response()->json([
             'analytics' => [
@@ -175,5 +182,25 @@ class AnalyticsController extends Controller
                 ];
             })
             ->all();
+    }
+
+    /**
+     * Return scoped program ids, or null for super admin/all-access users.
+     *
+     * @return array<int, int>|null
+     */
+    private function visibleProgramIds(Request $request): ?array
+    {
+        $user = $request->user();
+
+        if ($user === null || $user->isSuperAdmin()) {
+            return null;
+        }
+
+        if ($user->isOfficer()) {
+            return array_values(array_map('intval', $user->assigned_program_ids ?? []));
+        }
+
+        return [];
     }
 }

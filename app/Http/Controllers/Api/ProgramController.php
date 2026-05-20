@@ -26,6 +26,13 @@ class ProgramController extends Controller
             ->when($publishedOnly || $currentUser === null, function ($query): void {
                 $query->whereIn('status', ['Open', 'Closing Soon']);
             })
+            ->when($currentUser?->isOfficer(), function ($query) use ($currentUser): void {
+                $programIds = array_values(array_map('intval', $currentUser->assigned_program_ids ?? []));
+
+                $programIds === []
+                    ? $query->whereRaw('1 = 0')
+                    : $query->whereIn('id', $programIds);
+            })
             ->when($status !== null && $status !== '', fn ($query) => $query->where('status', $status))
             ->when($search !== '', function ($query) use ($search): void {
                 $query->where(function ($nestedQuery) use ($search): void {
@@ -62,6 +69,10 @@ class ProgramController extends Controller
      */
     public function show(ScholarshipProgram $program): JsonResponse
     {
+        $currentUser = request()->user('sanctum');
+
+        abort_unless($this->canAccessProgram($currentUser, $program), 403);
+
         return response()->json([
             'program' => new ScholarshipProgramResource($program),
         ]);
@@ -90,6 +101,8 @@ class ProgramController extends Controller
      */
     public function publish(ScholarshipProgram $program): JsonResponse
     {
+        abort_unless(request()->user()?->isSuperAdmin(), 403);
+
         $program->update([
             'status' => 'Open',
             'published_at' => now(),
@@ -105,6 +118,8 @@ class ProgramController extends Controller
      */
     public function assignAdmins(Request $request, ScholarshipProgram $program): JsonResponse
     {
+        abort_unless($request->user()?->isSuperAdmin(), 403);
+
         $validated = $request->validate([
             'officerId' => ['nullable', 'integer', 'exists:users,id'],
             'adminIds' => ['nullable', 'array'],
@@ -187,5 +202,27 @@ class ProgramController extends Controller
         }
 
         return $attributes;
+    }
+
+    /**
+     * Check whether a user can view one program.
+     */
+    private function canAccessProgram($user, ScholarshipProgram $program): bool
+    {
+        if ($user === null) {
+            return in_array($program->status, ['Open', 'Closing Soon'], true);
+        }
+
+        if ($user->isSuperAdmin() || $user->isStudent()) {
+            return true;
+        }
+
+        if ($user->isOfficer()) {
+            $programIds = array_values(array_map('intval', $user->assigned_program_ids ?? []));
+
+            return in_array((int) $program->id, $programIds, true);
+        }
+
+        return false;
     }
 }

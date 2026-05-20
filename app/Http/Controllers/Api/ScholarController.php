@@ -30,7 +30,14 @@ class ScholarController extends Controller
 
         $scholars = Scholar::query()
             ->with(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])
-            ->when(! ($currentUser?->isAdmin() ?? false), fn ($query) => $query->where('user_id', $currentUser?->id))
+            ->when($currentUser?->isStudent(), fn ($query) => $query->where('user_id', $currentUser->id))
+            ->when($currentUser?->isOfficer(), function ($query) use ($currentUser): void {
+                $programIds = $this->assignedProgramIds($currentUser);
+
+                $programIds === []
+                    ? $query->whereRaw('1 = 0')
+                    : $query->whereIn('scholarship_program_id', $programIds);
+            })
             ->when($riskLabel !== null && $riskLabel !== '', fn ($query) => $query->where('risk_label', $riskLabel))
             ->when($renewalStatus !== null && $renewalStatus !== '', fn ($query) => $query->where('renewal_status', $renewalStatus))
             ->when($search !== '', function ($query) use ($search): void {
@@ -54,7 +61,7 @@ class ScholarController extends Controller
      */
     public function show(Scholar $scholar): JsonResponse
     {
-        abort_unless(request()->user()?->isAdmin() || $scholar->user_id === request()->user()?->id, 403);
+        abort_unless($this->canAccessScholar(request()->user(), $scholar), 403);
 
         return response()->json([
             'scholar' => new ScholarResource($scholar->loadMissing(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])),
@@ -66,6 +73,8 @@ class ScholarController extends Controller
      */
     public function updateCompliance(UpdateScholarComplianceRequest $request, Scholar $scholar): JsonResponse
     {
+        abort_unless($this->canAccessScholar($request->user(), $scholar), 403);
+
         $validated = $request->validated();
         $original = $scholar->only([
             'compliance_status',
@@ -126,7 +135,7 @@ class ScholarController extends Controller
     {
         $currentUser = $request->user();
 
-        abort_unless($currentUser?->isAdmin() || $scholar->user_id === $currentUser?->id, 403);
+        abort_unless($this->canAccessScholar($currentUser, $scholar), 403);
 
         $validated = $request->validate([
             'grades' => ['required', 'array', 'min:1'],
@@ -178,6 +187,8 @@ class ScholarController extends Controller
             'submissions' => $submissions,
         ]);
 
+        $this->notifyOfficersOfSemesterSubmission($scholar->refresh());
+
         return response()->json([
             'scholar' => new ScholarResource($scholar->refresh()->loadMissing(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])),
         ]);
@@ -193,6 +204,13 @@ class ScholarController extends Controller
         $requestedAt = now()->toISOString();
         $scholars = Scholar::query()
             ->whereIn('scholarship_status', ['Active Scholar', 'Active', 'Pending Renewal', 'Under Renewal Review'])
+            ->when($request->user()?->isOfficer(), function ($query) use ($request): void {
+                $programIds = $this->assignedProgramIds($request->user());
+
+                $programIds === []
+                    ? $query->whereRaw('1 = 0')
+                    : $query->whereIn('scholarship_program_id', $programIds);
+            })
             ->get();
 
         $scholars->each(function (Scholar $scholar) use ($requestedAt): void {
@@ -233,6 +251,8 @@ class ScholarController extends Controller
      */
     public function sendRequirementRequest(StoreRequirementRequest $request, Scholar $scholar): JsonResponse
     {
+        abort_unless($this->canAccessScholar($request->user(), $scholar), 403);
+
         $validated = $request->validated();
         $requirements = $validated['requirements'];
         $message = $validated['message'] ?? 'Please submit the requested requirements.';
@@ -420,6 +440,28 @@ class ScholarController extends Controller
                 'complianceStatus' => $scholar->compliance_status,
                 'renewalStatus' => $scholar->renewal_status,
                 'scholarshipStatus' => $scholar->scholarship_status,
+            ],
+        ]);
+    }
+
+    /**
+     * Notify officers that an active scholar submitted semester requirements.
+     */
+    private function notifyOfficersOfSemesterSubmission(Scholar $scholar): void
+    {
+        $semester = $scholar->semester ?: 'current semester';
+
+        ScholarshipNotification::create([
+            'user_id' => null,
+            'role' => 'officer',
+            'type' => 'task',
+            'title' => 'Semester Requirements Submitted',
+            'message' => "{$scholar->name} submitted COE, COR, and encoded grades for {$semester}.",
+            'notified_at' => now(),
+            'payload' => [
+                'scholarId' => $scholar->id,
+                'programId' => $scholar->scholarship_program_id,
+                'applicationId' => $scholar->scholarship_application_id,
             ],
         ]);
     }
@@ -847,6 +889,36 @@ class ScholarController extends Controller
             'grades' => $this->gradesFromSubmissions($scholar->submissions ?? []),
             'submitted_at' => now(),
         ]);
+    }
+
+    /**
+     * Check whether a user can access one scholar record.
+     */
+    private function canAccessScholar($user, Scholar $scholar): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        if ($user->isOfficer()) {
+            return in_array((int) $scholar->scholarship_program_id, $this->assignedProgramIds($user), true);
+        }
+
+        return $scholar->user_id === $user->id;
+    }
+
+    /**
+     * Return assigned scholarship program ids for an officer.
+     *
+     * @return array<int, int>
+     */
+    private function assignedProgramIds($user): array
+    {
+        return array_values(array_map('intval', $user->assigned_program_ids ?? []));
     }
 
     /**

@@ -19,6 +19,8 @@ class UserController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        abort_unless($request->user()?->isSuperAdmin(), 403);
+
         $search = trim((string) $request->query('search', ''));
         $role = $request->query('role');
         $status = $request->query('status');
@@ -60,6 +62,8 @@ class UserController extends Controller
      */
     public function show(User $user): JsonResponse
     {
+        abort_unless(request()->user()?->isSuperAdmin(), 403);
+
         return response()->json([
             'user' => new UserResource($user),
         ]);
@@ -161,6 +165,12 @@ class UserController extends Controller
             }
         }
 
+        $programIds = $validated['programIds'] ?? $validated['assignedProgramIds'] ?? null;
+
+        if ($programIds !== null) {
+            $attributes['assigned_program_ids'] = $this->normalizeProgramIds($programIds);
+        }
+
         if ($isCreation) {
             $attributes['password'] = 'password';
             $attributes['email_verified_at'] = now();
@@ -170,5 +180,19 @@ class UserController extends Controller
         }
 
         return $attributes;
+    }
+
+    /**
+     * Normalize program ids for assignment storage.
+     *
+     * @param array<int, mixed> $programIds
+     * @return array<int, int>
+     */
+    private function normalizeProgramIds(array $programIds): array
+    {
+        return array_values(array_unique(array_map(
+            static fn (mixed $programId): int => (int) $programId,
+            $programIds,
+        )));
     }
 }

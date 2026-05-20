@@ -13,7 +13,7 @@ class StoreUserRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return $this->user()?->isAdmin() ?? false;
+        return $this->user()?->isSuperAdmin() ?? false;
     }
 
     /**
@@ -33,6 +33,10 @@ class StoreUserRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:30'],
             'schoolName' => ['nullable', 'string', 'max:255'],
             'familyIncome' => ['nullable', 'numeric', 'min:0'],
+            'assignedProgramIds' => ['nullable', 'array'],
+            'assignedProgramIds.*' => ['integer', 'exists:scholarship_programs,id'],
+            'programIds' => ['nullable', 'array'],
+            'programIds.*' => ['integer', 'exists:scholarship_programs,id'],
         ];
     }
 }

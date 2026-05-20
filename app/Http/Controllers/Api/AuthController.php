@@ -123,7 +123,7 @@ class AuthController extends Controller
         return [
             'name' => $validated['fullName'],
             'email' => $validated['email'],
-            'password' => Str::random(32),
+            'password' => $validated['password'] ?? $this->birthdatePasswordFromValue($validated['birthDate'] ?? null) ?: Str::random(32),
             'role' => 'student',
             'status' => 'Active',
             'gender' => $validated['gender'] ?? null,
@@ -167,6 +167,26 @@ class AuthController extends Controller
         }
 
         return $user->birth_date->format('mdy');
+    }
+
+    /**
+     * Convert a registration birthdate value to MMDDYY.
+     */
+    private function birthdatePasswordFromValue(?string $birthDate): string
+    {
+        if ($birthDate === null || $birthDate === '') {
+            return '';
+        }
+
+        $parts = explode('-', $birthDate);
+
+        if (count($parts) !== 3) {
+            return '';
+        }
+
+        [$year, $month, $day] = $parts;
+
+        return str_pad($month, 2, '0', STR_PAD_LEFT).str_pad($day, 2, '0', STR_PAD_LEFT).substr($year, -2);
     }
 
     /**

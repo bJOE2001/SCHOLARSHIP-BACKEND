@@ -8,6 +8,7 @@ use App\Http\Resources\ApplicationDocumentResource;
 use App\Models\ApplicationDocument;
 use App\Models\ScholarshipApplication;
 use App\Models\ScholarshipNotification;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -19,6 +20,9 @@ class DocumentController extends Controller
      */
     public function showFile(ApplicationDocument $document): StreamedResponse
     {
+        $application = $document->application()->first();
+
+        abort_unless($application !== null && $this->canAccessApplication(request()->user(), $application), 403);
         abort_if($document->path === null || ! Storage::disk('local')->exists($document->path), 404);
 
         return Storage::disk('local')->response(
@@ -34,6 +38,9 @@ class DocumentController extends Controller
     {
         $validated = $request->validated();
         $application = $document->application()->with('documents', 'program')->first();
+
+        abort_unless($application !== null && $this->canAccessApplication($request->user(), $application), 403);
+
         $statusChanged = $document->status !== $validated['status'];
         $remarksChanged = array_key_exists('remarks', $validated) && ($validated['remarks'] ?? null) !== $document->remarks;
 
@@ -110,5 +117,27 @@ class DocumentController extends Controller
             'Rejected', 'Missing' => 'warning',
             default => 'status',
         };
+    }
+
+    /**
+     * Check whether the signed-in user can access this application's documents.
+     */
+    private function canAccessApplication(?User $user, ScholarshipApplication $application): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        if ($user->isOfficer()) {
+            $programIds = array_values(array_map('intval', $user->assigned_program_ids ?? []));
+
+            return in_array((int) $application->scholarship_program_id, $programIds, true);
+        }
+
+        return $application->applicant_id === $user->id;
     }
 }

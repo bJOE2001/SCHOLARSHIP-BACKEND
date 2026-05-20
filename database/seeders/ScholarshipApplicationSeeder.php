@@ -17,10 +17,10 @@ class ScholarshipApplicationSeeder extends Seeder
         $studentOne = User::query()->where('email', 'student1@example.com')->firstOrFail();
         $studentTwo = User::query()->where('email', 'student2@example.com')->firstOrFail();
         $studentThree = User::query()->where('email', 'student3@example.com')->firstOrFail();
-        $programOne = ScholarshipProgram::query()->where('name', 'Merit Scholars Grant')->firstOrFail();
-        $programTwo = ScholarshipProgram::query()->where('name', 'STEM Excellence Scholarship')->firstOrFail();
-        $programThree = ScholarshipProgram::query()->where('name', 'Community Service Grant')->firstOrFail();
-        $programFour = ScholarshipProgram::query()->where('name', 'Academic Support Fund')->firstOrFail();
+        $programOne = ScholarshipProgram::query()->where('provider', 'TDP')->firstOrFail();
+        $programTwo = ScholarshipProgram::query()->where('provider', 'TES')->firstOrFail();
+        $programThree = ScholarshipProgram::query()->where('provider', 'DOST')->firstOrFail();
+        $programFour = ScholarshipProgram::query()->where('provider', 'EAP')->firstOrFail();
         $adminUser = User::query()->where('email', 'admin@example.com')->firstOrFail();
 
         ScholarshipApplication::create([

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api;
 
+use App\Mail\StudentRegistrationMail;
 use App\Models\ApplicationDocument;
 use App\Models\Scholar;
 use App\Models\ScholarshipApplication;
@@ -10,6 +11,7 @@ use App\Models\ScholarshipProgram;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -47,6 +49,8 @@ class ScholarshipApiTest extends TestCase
 
     public function test_student_can_register_with_profile_details_and_login_with_birthdate_password(): void
     {
+        Mail::fake();
+
         $response = $this->postJson('/api/auth/register', [
             'fullName' => 'Register Student',
             'email' => 'register.student@example.com',
@@ -65,6 +69,9 @@ class ScholarshipApiTest extends TestCase
         $response->assertCreated();
         $response->assertJsonPath('user.role', 'student');
         $response->assertJsonPath('user.email', 'register.student@example.com');
+        Mail::assertQueued(StudentRegistrationMail::class, function (StudentRegistrationMail $mail): bool {
+            return $mail->hasTo('register.student@example.com');
+        });
 
         $loginResponse = $this->postJson('/api/auth/login', [
             'email' => 'register.student@example.com',
@@ -187,7 +194,7 @@ class ScholarshipApiTest extends TestCase
             'role' => 'student',
         ]);
         $program = $this->createProgram('Draft Program', [
-            'requirements' => ['Certificate of Registration', 'Grades Transcript'],
+            'requirements' => ['Certificate of Ratings', 'Certificate of Indigency'],
         ]);
 
         Sanctum::actingAs($student);
@@ -195,11 +202,41 @@ class ScholarshipApiTest extends TestCase
         $response = $this->postJson('/api/applications/drafts', [
             'studentId' => $student->id,
             'programId' => $program->id,
+            'name' => 'Draft Student Updated',
+            'gender' => 'Female',
+            'birthDate' => '2004-05-18',
+            'civilStatus' => 'Single',
+            'citizenship' => 'Filipino',
+            'address' => 'Zone 1',
+            'barangay' => 'Poblacion',
+            'city' => 'Bislig City',
+            'province' => 'Surigao del Sur',
+            'contactNumber' => '09171234567',
+            'schoolName' => 'Draft University',
+            'applicantStudentId' => 'STU-2026-001',
+            'course' => 'BS Information Technology',
+            'yearLevel' => '3rd Year',
+            'semester' => 'First Semester',
+            'academicYear' => '2026-2027',
+            'gpa' => 93.25,
+            'familyIncome' => 120000,
+            'enrollmentStatus' => 'Enrolled',
+            'parentOccupation' => 'Fisher',
         ]);
 
         $response->assertCreated();
         $response->assertJsonPath('application.status', 'Draft');
         $response->assertJsonPath('application.applicantId', $student->id);
+        $response->assertJsonPath('application.applicant.name', 'Draft Student Updated');
+        $response->assertJsonPath('application.applicant.studentId', 'STU-2026-001');
+        $response->assertJsonPath('application.applicant.schoolName', 'Draft University');
+        $response->assertJsonPath('application.applicant.birthDate', '2004-05-18');
+        $this->assertDatabaseHas('users', [
+            'id' => $student->id,
+            'contact_number' => '09171234567',
+            'course' => 'BS Information Technology',
+            'gpa' => 93.25,
+        ]);
         $this->assertDatabaseCount('application_documents', 2);
     }
 
@@ -214,7 +251,7 @@ class ScholarshipApiTest extends TestCase
             'role' => 'student',
         ]);
         $program = $this->createProgram('Submit Program', [
-            'requirements' => ['Certificate of Registration'],
+            'requirements' => ['Certificate of Ratings'],
         ]);
 
         Sanctum::actingAs($student);
@@ -226,7 +263,7 @@ class ScholarshipApiTest extends TestCase
         $applicationId = $draftResponse->json('application.id');
 
         $this->postJson("/api/applications/{$applicationId}/documents", [
-            'requirementName' => 'Certificate of Registration',
+            'requirementName' => 'Certificate of Ratings',
             'file' => UploadedFile::fake()->create('registration.pdf', 128, 'application/pdf'),
         ])->assertCreated();
 
@@ -242,6 +279,54 @@ class ScholarshipApiTest extends TestCase
         $this->assertNotNull(ScholarshipApplication::query()->find($applicationId)?->submitted_at);
     }
 
+    public function test_student_can_submit_application_with_to_follow_documents_missing(): void
+    {
+        Storage::fake('local');
+
+        $student = User::factory()->create([
+            'name' => 'To Follow Student',
+            'email' => 'to.follow.student@example.com',
+            'password' => 'password',
+            'role' => 'student',
+        ]);
+        $program = $this->createProgram('To Follow Program', [
+            'requirements' => ['Certificate of Indigency', 'Certificate of Enrollment / COE'],
+            'requirement_rules' => [
+                [
+                    'name' => 'Certificate of Indigency',
+                    'stage' => 'application',
+                    'isRequired' => true,
+                    'allowToFollow' => false,
+                ],
+                [
+                    'name' => 'Certificate of Enrollment / COE',
+                    'stage' => 'application',
+                    'isRequired' => true,
+                    'allowToFollow' => true,
+                ],
+            ],
+        ]);
+
+        Sanctum::actingAs($student);
+
+        $draftResponse = $this->postJson('/api/applications/drafts', [
+            'studentId' => $student->id,
+            'programId' => $program->id,
+        ]);
+        $applicationId = $draftResponse->json('application.id');
+
+        $this->postJson("/api/applications/{$applicationId}/documents", [
+            'requirementName' => 'Certificate of Indigency',
+            'file' => UploadedFile::fake()->create('indigency.pdf', 128, 'application/pdf'),
+        ])->assertCreated();
+
+        $submitResponse = $this->postJson("/api/applications/{$applicationId}/submit");
+
+        $submitResponse->assertOk();
+        $submitResponse->assertJsonPath('application.status', 'Submitted');
+        $submitResponse->assertJsonPath('application.missingRequirements.0', 'Certificate of Enrollment / COE');
+    }
+
     public function test_student_cannot_submit_application_with_missing_requirement_documents(): void
     {
         $student = User::factory()->create([
@@ -251,7 +336,7 @@ class ScholarshipApiTest extends TestCase
             'role' => 'student',
         ]);
         $program = $this->createProgram('Missing Requirement Program', [
-            'requirements' => ['Certificate of Registration'],
+            'requirements' => ['Certificate of Ratings'],
         ]);
 
         Sanctum::actingAs($student);
@@ -265,7 +350,7 @@ class ScholarshipApiTest extends TestCase
         $submitResponse = $this->postJson("/api/applications/{$applicationId}/submit");
 
         $submitResponse->assertUnprocessable();
-        $submitResponse->assertJsonPath('errors.documents.0', 'Certificate of Registration');
+        $submitResponse->assertJsonPath('errors.documents.0', 'Certificate of Ratings');
         $this->assertDatabaseHas('scholarship_applications', [
             'id' => $applicationId,
             'status' => 'Draft',
@@ -376,7 +461,7 @@ class ScholarshipApiTest extends TestCase
             'school_name' => 'ScholarSync State University',
         ]);
         $program = $this->createProgram('Review Program', [
-            'requirements' => ['Certificate of Registration', 'Grades Transcript'],
+            'requirements' => ['Certificate of Ratings', 'Certificate of Indigency'],
         ]);
         $application = ScholarshipApplication::create([
             'scholarship_program_id' => $program->id,
@@ -408,7 +493,7 @@ class ScholarshipApiTest extends TestCase
 
         ApplicationDocument::create([
             'scholarship_application_id' => $application->id,
-            'name' => 'Certificate of Registration',
+            'name' => 'Certificate of Ratings',
             'type' => 'PDF',
             'path' => 'applications/99999/cor.pdf',
             'status' => 'Pending',
@@ -420,9 +505,9 @@ class ScholarshipApiTest extends TestCase
 
         ApplicationDocument::create([
             'scholarship_application_id' => $application->id,
-            'name' => 'Grades Transcript',
+            'name' => 'Certificate of Indigency',
             'type' => 'PDF',
-            'path' => 'applications/99999/transcript.pdf',
+            'path' => 'applications/99999/indigency.pdf',
             'status' => 'Pending',
             'remarks' => 'Pending validation.',
             'uploaded_by_id' => $studentUser->id,
@@ -453,6 +538,62 @@ class ScholarshipApiTest extends TestCase
             'type' => 'success',
             'title' => 'Application Status Updated',
         ]);
+    }
+
+    public function test_officer_application_review_queue_returns_assigned_review_applications_with_applicant_data(): void
+    {
+        $assignedProgram = $this->createProgram('Assigned Review Program');
+        $unassignedProgram = $this->createProgram('Unassigned Review Program');
+        $officer = User::factory()->officer()->create([
+            'name' => 'Assigned Review Officer',
+            'email' => 'assigned.review.officer@example.com',
+            'password' => 'password',
+            'assigned_program_ids' => [$assignedProgram->id],
+        ]);
+        $student = User::factory()->create([
+            'name' => 'Review Queue Student',
+            'email' => 'review.queue.student@example.com',
+            'gpa' => 94.25,
+        ]);
+        $reviewApplication = ScholarshipApplication::factory()
+            ->for($assignedProgram, 'program')
+            ->for($student, 'applicant')
+            ->underReview()
+            ->create([
+                'application_no' => 'APP-REVIEW-001',
+            ]);
+
+        $submittedApplication = ScholarshipApplication::factory()
+            ->for($assignedProgram, 'program')
+            ->for($student, 'applicant')
+            ->submitted()
+            ->create([
+                'application_no' => 'APP-SUBMITTED-001',
+            ]);
+
+        ScholarshipApplication::factory()
+            ->for($unassignedProgram, 'program')
+            ->for($student, 'applicant')
+            ->underReview()
+            ->create([
+                'application_no' => 'APP-HIDDEN-001',
+            ]);
+
+        Sanctum::actingAs($officer);
+
+        $response = $this->getJson('/api/applications/review?search=Review%20Queue&status=Under%20Review');
+
+        $response->assertOk();
+        $response->assertJsonCount(1, 'applications');
+        $response->assertJsonPath('applications.0.id', $reviewApplication->id);
+        $response->assertJsonPath('applications.0.applicant.name', $student->name);
+        $response->assertJsonPath('applications.0.applicantGpa', 94.25);
+        $response->assertJsonPath('applications.0.programName', $assignedProgram->name);
+
+        $this->getJson('/api/applications/review?status=Submitted')
+            ->assertOk()
+            ->assertJsonCount(1, 'applications')
+            ->assertJsonPath('applications.0.id', $submittedApplication->id);
     }
 
     public function test_officer_only_sees_assigned_program_applications_programs_and_scholars(): void

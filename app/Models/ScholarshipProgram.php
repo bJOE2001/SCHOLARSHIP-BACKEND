@@ -41,6 +41,7 @@ class ScholarshipProgram extends Model
         'schedule',
         'eligibility',
         'requirements',
+        'requirement_rules',
         'scoring_criteria',
         'renewal_rules',
         'published_at',
@@ -60,6 +61,7 @@ class ScholarshipProgram extends Model
             'schedule' => 'array',
             'eligibility' => 'array',
             'requirements' => 'array',
+            'requirement_rules' => 'array',
             'scoring_criteria' => 'array',
             'renewal_rules' => 'array',
             'published_at' => 'datetime',
@@ -122,6 +124,81 @@ class ScholarshipProgram extends Model
     }
 
     /**
+     * Build default rules for flat requirement name lists.
+     *
+     * @param  array<int, mixed>  $requirements
+     * @return array<int, array{name: string, stage: string, isRequired: bool, allowToFollow: bool}>
+     */
+    public static function defaultRequirementRules(array $requirements): array
+    {
+        return collect($requirements)
+            ->map(static function (mixed $requirement): ?array {
+                if (! is_string($requirement) || trim($requirement) === '') {
+                    return null;
+                }
+
+                return [
+                    'name' => trim($requirement),
+                    'stage' => 'application',
+                    'isRequired' => true,
+                    'allowToFollow' => false,
+                ];
+            })
+            ->filter()
+            ->unique('name')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Return normalized application requirement rules.
+     *
+     * @return array<int, array{name: string, stage: string, isRequired: bool, allowToFollow: bool}>
+     */
+    public function requirementRules(): array
+    {
+        $rules = collect($this->requirement_rules ?? [])
+            ->map(fn (mixed $rule): ?array => $this->normalizeRequirementRule($rule))
+            ->filter()
+            ->keyBy('name');
+
+        foreach (self::defaultRequirementRules($this->requirements ?? []) as $rule) {
+            if (! $rules->has($rule['name'])) {
+                $rules->put($rule['name'], $rule);
+            }
+        }
+
+        return $rules->values()->all();
+    }
+
+    /**
+     * Return every document name configured for this program.
+     *
+     * @return array<int, string>
+     */
+    public function requirementNames(): array
+    {
+        return collect($this->requirementRules())
+            ->pluck('name')
+            ->all();
+    }
+
+    /**
+     * Return the documents that must exist before an application can be submitted.
+     *
+     * @return array<int, string>
+     */
+    public function requiredApplicationRequirementNames(): array
+    {
+        return collect($this->requirementRules())
+            ->filter(static fn (array $rule): bool => $rule['stage'] === 'application'
+                && $rule['isRequired']
+                && ! $rule['allowToFollow'])
+            ->pluck('name')
+            ->all();
+    }
+
+    /**
      * Keep the old assigned_admin_ids attribute API backed by the pivot table.
      */
     protected function assignedAdminIds(): Attribute
@@ -151,5 +228,28 @@ class ScholarshipProgram extends Model
             array_map(static fn (mixed $userId): int => (int) $userId, $userIds),
             static fn (int $userId): bool => $userId > 0,
         )));
+    }
+
+    /**
+     * @return array{name: string, stage: string, isRequired: bool, allowToFollow: bool}|null
+     */
+    private function normalizeRequirementRule(mixed $rule): ?array
+    {
+        if (is_string($rule)) {
+            return self::defaultRequirementRules([$rule])[0] ?? null;
+        }
+
+        if (! is_array($rule) || ! is_string($rule['name'] ?? null) || trim($rule['name']) === '') {
+            return null;
+        }
+
+        return [
+            'name' => trim($rule['name']),
+            'stage' => is_string($rule['stage'] ?? null) && trim($rule['stage']) !== ''
+                ? trim($rule['stage'])
+                : 'application',
+            'isRequired' => array_key_exists('isRequired', $rule) ? (bool) $rule['isRequired'] : true,
+            'allowToFollow' => (bool) ($rule['allowToFollow'] ?? false),
+        ];
     }
 }

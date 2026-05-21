@@ -564,7 +564,7 @@ class ScholarController extends Controller
     {
         $documents = $application->documents->keyBy('name');
 
-        return collect($application->program?->requirements ?? [])
+        return collect($application->program?->requirementNames() ?? [])
             ->map(function (string $requirement) use ($documents): array {
                 $document = $documents->get($requirement);
 
@@ -724,8 +724,8 @@ class ScholarController extends Controller
         if ($corStatus !== null) {
             $updated = $this->updateSubmissionByKey($updated, 'cor', [
                 'key' => 'cor',
-                'requirement' => 'Certificate of Registration / COR',
-                'name' => 'Certificate of Registration / COR',
+                'requirement' => 'Certificate of Ratings / COR',
+                'name' => 'Certificate of Ratings / COR',
                 'status' => $corStatus,
                 'submittedAt' => now()->toISOString(),
             ]);
@@ -772,8 +772,8 @@ class ScholarController extends Controller
             ],
             [
                 'key' => 'cor',
-                'requirement' => 'Certificate of Registration / COR',
-                'name' => 'Certificate of Registration / COR',
+                'requirement' => 'Certificate of Ratings / COR',
+                'name' => 'Certificate of Ratings / COR',
                 'status' => 'Missing',
                 'requestedAt' => $requestedAt,
             ],
@@ -800,16 +800,16 @@ class ScholarController extends Controller
     {
         $documents = ApplicationDocument::query()
             ->where('scholarship_application_id', $scholar->scholarship_application_id)
-            ->whereIn('name', ['Certificate of Enrollment / COE', 'Certificate of Registration / COR'])
+            ->whereIn('name', ['Certificate of Enrollment / COE', 'Certificate of Ratings / COR'])
             ->get()
             ->keyBy('name');
 
         $coe = $documents->get('Certificate of Enrollment / COE');
-        $cor = $documents->get('Certificate of Registration / COR');
+        $cor = $documents->get('Certificate of Ratings / COR');
 
         return [
             $this->documentSubmissionEntry('coe', 'Certificate of Enrollment / COE', $coe, $submittedAt),
-            $this->documentSubmissionEntry('cor', 'Certificate of Registration / COR', $cor, $submittedAt),
+            $this->documentSubmissionEntry('cor', 'Certificate of Ratings / COR', $cor, $submittedAt),
             [
                 'key' => 'encoded-grades',
                 'requirement' => 'Encoded Grades',

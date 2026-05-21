@@ -47,11 +47,8 @@ class ScholarshipProgramSeeder extends Seeder
                     'Must meet the program academic or financial qualification',
                     'Must submit complete and valid requirements',
                 ],
-                'requirements' => [
-                    'Certificate of Registration',
-                    'Grades Transcript',
-                    'Certificate of Indigency',
-                ],
+                'requirements' => $this->applicationRequirements(),
+                'requirement_rules' => $this->applicationRequirementRules($program['code']),
                 'scoring_criteria' => [
                     'Academic standing',
                     'Financial need',
@@ -76,6 +73,35 @@ class ScholarshipProgramSeeder extends Seeder
                 ->pluck('id')
                 ->map(static fn (mixed $id): int => (int) $id)
                 ->all(),
+        );
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function applicationRequirements(): array
+    {
+        return [
+            'Certificate of Enrollment / COE',
+            'Certificate of Ratings',
+            'Certificate of Indigency',
+        ];
+    }
+
+    /**
+     * @return array<int, array{name: string, stage: string, isRequired: bool, allowToFollow: bool}>
+     */
+    private function applicationRequirementRules(string $provider): array
+    {
+        return array_map(
+            static function (array $rule) use ($provider): array {
+                if ($provider === 'SKEA' && $rule['name'] !== 'Certificate of Indigency') {
+                    $rule['allowToFollow'] = true;
+                }
+
+                return $rule;
+            },
+            ScholarshipProgram::defaultRequirementRules($this->applicationRequirements()),
         );
     }
 }

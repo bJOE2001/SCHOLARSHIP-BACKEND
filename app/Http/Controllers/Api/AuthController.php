@@ -6,13 +6,16 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterStudentRequest;
 use App\Http\Resources\UserResource;
+use App\Mail\StudentRegistrationMail;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class AuthController extends Controller
 {
@@ -52,6 +55,7 @@ class AuthController extends Controller
     {
         $validated = $request->validated();
         $user = User::create($this->buildStudentAttributes($validated));
+        $this->sendRegistrationEmail($user);
         $token = $user->createToken('scholarship-web')->plainTextToken;
 
         return response()->json([
@@ -208,5 +212,17 @@ class AuthController extends Controller
             'PHP 60,000 and above' => 65000.0,
             default => null,
         };
+    }
+
+    /**
+     * Send a welcome email after a student registers.
+     */
+    private function sendRegistrationEmail(User $user): void
+    {
+        try {
+            Mail::to($user->email)->queue(new StudentRegistrationMail($user));
+        } catch (Throwable $throwable) {
+            report($throwable);
+        }
     }
 }

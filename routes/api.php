@@ -53,6 +53,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/programs/{program}/publish', [ProgramController::class, 'publish']);
         Route::post('/programs/{program}/officers', [ProgramController::class, 'assignAdmins']);
 
+        Route::get('/applications/review', [ApplicationController::class, 'review']);
         Route::patch('/applications/{application}/status', [ApplicationController::class, 'updateStatus']);
         Route::get('/documents/{document}/file', [DocumentController::class, 'showFile'])->name('documents.file');
         Route::patch('/documents/{document}/status', [DocumentController::class, 'updateStatus']);

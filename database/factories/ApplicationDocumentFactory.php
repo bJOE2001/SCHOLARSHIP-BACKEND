@@ -24,8 +24,8 @@ class ApplicationDocumentFactory extends Factory
         return [
             'scholarship_application_id' => ScholarshipApplication::factory(),
             'name' => fake()->randomElement([
-                'Certificate of Registration',
-                'Grades Transcript',
+                'Certificate of Enrollment / COE',
+                'Certificate of Ratings',
                 'Certificate of Indigency',
                 'Good Moral Certificate',
             ]),

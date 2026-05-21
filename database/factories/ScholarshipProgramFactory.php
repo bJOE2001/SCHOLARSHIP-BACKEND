@@ -19,6 +19,11 @@ class ScholarshipProgramFactory extends Factory
     {
         $slots = fake()->numberBetween(10, 50);
         $usedSlots = fake()->numberBetween(0, max($slots - 1, 0));
+        $requirements = [
+            'Certificate of Enrollment / COE',
+            'Certificate of Ratings',
+            'Certificate of Indigency',
+        ];
 
         return [
             'name' => fake()->randomElement([
@@ -56,11 +61,8 @@ class ScholarshipProgramFactory extends Factory
                 'Maintain the required GPA',
                 'Submit all documentary requirements',
             ],
-            'requirements' => [
-                'Certificate of Registration',
-                'Grades Transcript',
-                'Certificate of Indigency',
-            ],
+            'requirements' => $requirements,
+            'requirement_rules' => ScholarshipProgram::defaultRequirementRules($requirements),
             'scoring_criteria' => [
                 'Academic performance',
                 'Financial need',

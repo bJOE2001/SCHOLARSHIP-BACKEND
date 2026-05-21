@@ -170,6 +170,7 @@ class ProgramController extends Controller
             'schedule' => 'schedule',
             'eligibility' => 'eligibility',
             'requirements' => 'requirements',
+            'requirementRules' => 'requirement_rules',
             'scoringCriteria' => 'scoring_criteria',
             'renewalRules' => 'renewal_rules',
         ];
@@ -180,6 +181,10 @@ class ProgramController extends Controller
             if (array_key_exists($inputKey, $validated)) {
                 $attributes[$databaseColumn] = $validated[$inputKey];
             }
+        }
+
+        if (array_key_exists('requirements', $validated) && ! array_key_exists('requirementRules', $validated)) {
+            $attributes['requirement_rules'] = ScholarshipProgram::defaultRequirementRules($validated['requirements']);
         }
 
         if ($isCreation) {

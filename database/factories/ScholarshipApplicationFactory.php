@@ -44,7 +44,7 @@ class ScholarshipApplicationFactory extends Factory
             'remarks' => fake()->sentence(10),
             'next_action' => fake()->sentence(8),
             'missing_requirements' => fake()->boolean()
-                ? ['Certificate of Registration', 'Grades Transcript']
+                ? ['Certificate of Enrollment / COE', 'Certificate of Ratings', 'Certificate of Indigency']
                 : [],
             'timeline' => [
                 [

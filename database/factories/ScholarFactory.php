@@ -63,12 +63,8 @@ class ScholarFactory extends Factory
             'recommended_action' => fake()->sentence(8),
             'submissions' => [
                 [
-                    'requirement' => 'Certificate of Registration',
+                    'requirement' => 'Certificate of Ratings',
                     'status' => fake()->randomElement(['Submitted', 'Accepted', 'Pending']),
-                ],
-                [
-                    'requirement' => 'Grades Transcript',
-                    'status' => fake()->randomElement(['Submitted', 'Accepted', 'Pending', 'Rejected']),
                 ],
                 [
                     'requirement' => 'Certificate of Indigency',

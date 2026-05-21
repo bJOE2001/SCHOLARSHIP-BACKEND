@@ -43,6 +43,50 @@ class ApplicationController extends Controller
     }
 
     /**
+     * List applications currently available in the officer review workspace.
+     */
+    public function review(Request $request): JsonResponse
+    {
+        $search = trim((string) $request->query('search', ''));
+        $status = trim((string) $request->query('status', ''));
+        $programId = (int) $request->query('programId', 0);
+
+        $applications = $this->visibleApplicationsQuery($request)
+            ->with(['documents', 'applicant', 'program'])
+            ->whereIn('status', $this->reviewStatuses())
+            ->when(in_array($status, $this->reviewStatuses(), true), fn (Builder $query) => $query->where('status', $status))
+            ->when($programId > 0, fn (Builder $query) => $query->where('scholarship_program_id', $programId))
+            ->when($search !== '', function (Builder $query) use ($search): void {
+                $query->where(function (Builder $nestedQuery) use ($search): void {
+                    $nestedQuery
+                        ->where('application_no', 'like', "%{$search}%")
+                        ->orWhereHas('applicant', function (Builder $applicantQuery) use ($search): void {
+                            $applicantQuery
+                                ->where('name', 'like', "%{$search}%")
+                                ->orWhere('email', 'like', "%{$search}%");
+                        })
+                        ->orWhereHas('program', function (Builder $programQuery) use ($search): void {
+                            $programQuery
+                                ->where('name', 'like', "%{$search}%")
+                                ->orWhere('provider', 'like', "%{$search}%");
+                        });
+                });
+            })
+            ->latest('submitted_at')
+            ->latest()
+            ->get();
+
+        $documents = $applications
+            ->flatMap(fn (ScholarshipApplication $application) => $application->documents)
+            ->values();
+
+        return response()->json([
+            'applications' => ScholarshipApplicationResource::collection($applications),
+            'documents' => ApplicationDocumentResource::collection($documents),
+        ]);
+    }
+
+    /**
      * Create or reuse a draft application.
      */
     public function draft(StoreApplicationDraftRequest $request): JsonResponse
@@ -53,6 +97,8 @@ class ApplicationController extends Controller
         $programId = (int) $validated['programId'];
         $student = User::query()->findOrFail($studentId);
         $program = ScholarshipProgram::query()->findOrFail($programId);
+
+        $this->syncStudentProfile($student, $validated);
 
         $application = ScholarshipApplication::firstOrCreate(
             [
@@ -67,7 +113,7 @@ class ApplicationController extends Controller
                 'progress' => 0,
                 'remarks' => 'Draft application created.',
                 'next_action' => 'Complete the scholarship form.',
-                'missing_requirements' => $program->requirements ?? [],
+                'missing_requirements' => $program->requirementNames(),
                 'timeline' => [
                     [
                         'status' => 'Draft',
@@ -205,15 +251,16 @@ class ApplicationController extends Controller
 
         $application->loadMissing(['documents', 'applicant', 'program']);
         $missingRequirements = $this->missingUploadedRequirements($application);
+        $requiredMissingRequirements = $this->missingUploadedRequirements($application, true);
 
-        if ($missingRequirements !== []) {
+        if ($requiredMissingRequirements !== []) {
             $application->syncMissingRequirements($missingRequirements);
             $application->save();
 
             return response()->json([
                 'message' => 'Please upload all required documents before submitting.',
                 'errors' => [
-                    'documents' => $missingRequirements,
+                    'documents' => $requiredMissingRequirements,
                 ],
             ], 422);
         }
@@ -226,7 +273,7 @@ class ApplicationController extends Controller
             'progress' => $this->progressForStatus($nextStatus),
             'remarks' => $remarks,
             'next_action' => $this->nextActionForStatus($nextStatus),
-            'missing_requirements' => [],
+            'missing_requirements' => $missingRequirements,
             'submitted_at' => now(),
         ]);
         $application->appendTimelineEvent($nextStatus, $remarks);
@@ -288,11 +335,69 @@ class ApplicationController extends Controller
     }
 
     /**
+     * Save review-facing applicant profile details supplied during application.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function syncStudentProfile(User $student, array $validated): void
+    {
+        $attributeMap = [
+            'name' => 'name',
+            'gender' => 'gender',
+            'birthDate' => 'birth_date',
+            'civilStatus' => 'civil_status',
+            'citizenship' => 'citizenship',
+            'address' => 'address',
+            'barangay' => 'barangay',
+            'city' => 'city',
+            'province' => 'province',
+            'contactNumber' => 'contact_number',
+            'campus' => 'campus',
+            'schoolName' => 'school_name',
+            'applicantStudentId' => 'student_id',
+            'course' => 'course',
+            'yearLevel' => 'year_level',
+            'semester' => 'semester',
+            'academicYear' => 'academic_year',
+            'gpa' => 'gpa',
+            'familyIncome' => 'family_income',
+            'enrollmentStatus' => 'enrollment_status',
+            'academicAwards' => 'academic_awards',
+            'fatherName' => 'father_name',
+            'motherName' => 'mother_name',
+            'guardianName' => 'guardian_name',
+            'parentOccupation' => 'parent_occupation',
+            'monthlyIncome' => 'monthly_income',
+            'siblings' => 'siblings',
+            'studyingSiblings' => 'studying_siblings',
+            'incomeBracket' => 'income_bracket',
+        ];
+
+        $attributes = [];
+
+        foreach ($attributeMap as $payloadKey => $databaseColumn) {
+            if (array_key_exists($payloadKey, $validated)) {
+                $attributes[$databaseColumn] = $validated[$payloadKey];
+            }
+        }
+
+        if ($attributes === []) {
+            return;
+        }
+
+        $student->fill($attributes);
+
+        if ($student->isDirty()) {
+            $student->save();
+        }
+    }
+
+    /**
      * Create missing document placeholders for a draft application.
      */
     private function seedRequirementDocuments(ScholarshipApplication $application, ScholarshipProgram $program): void
     {
-        foreach ($program->requirements ?? [] as $requirement) {
+        foreach ($program->requirementNames() as $requirement) {
             ApplicationDocument::firstOrCreate(
                 [
                     'scholarship_application_id' => $application->id,
@@ -316,11 +421,14 @@ class ApplicationController extends Controller
      *
      * @return array<int, string>
      */
-    private function missingUploadedRequirements(ScholarshipApplication $application): array
+    private function missingUploadedRequirements(ScholarshipApplication $application, bool $requiredForSubmissionOnly = false): array
     {
         $documents = $application->documents->keyBy('name');
+        $requirementNames = $requiredForSubmissionOnly
+            ? $application->program?->requiredApplicationRequirementNames() ?? []
+            : $application->program?->requirementNames() ?? [];
 
-        return collect($application->program?->requirements ?? [])
+        return collect($requirementNames)
             ->filter(function (string $requirement) use ($documents): bool {
                 $document = $documents->get($requirement);
 
@@ -408,7 +516,7 @@ class ApplicationController extends Controller
     private function buildSubmissions(ScholarshipApplication $application): array
     {
         $documents = $application->documents->keyBy('name');
-        $requirements = $application->program?->requirements ?? [];
+        $requirements = $application->program?->requirementNames() ?? [];
 
         return collect($requirements)
             ->map(function (string $requirement) use ($documents): array {
@@ -457,6 +565,21 @@ class ApplicationController extends Controller
             'Suspended',
             'Renewal Pending',
             'Renewed',
+        ];
+    }
+
+    /**
+     * Return application statuses available for officer review.
+     *
+     * @return array<int, string>
+     */
+    private function reviewStatuses(): array
+    {
+        return [
+            'Submitted',
+            'Under Review',
+            'Eligible',
+            'Shortlisted',
         ];
     }
 

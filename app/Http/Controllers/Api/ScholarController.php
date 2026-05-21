@@ -30,7 +30,14 @@ class ScholarController extends Controller
 
         $scholars = Scholar::query()
             ->with(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])
-            ->when(! ($currentUser?->isAdmin() ?? false), fn ($query) => $query->where('user_id', $currentUser?->id))
+            ->when($currentUser?->isStudent(), fn ($query) => $query->where('user_id', $currentUser->id))
+            ->when($currentUser?->isOfficer() && ! $currentUser?->isSuperAdmin(), function ($query) use ($currentUser): void {
+                $programIds = $this->assignedProgramIds($currentUser);
+
+                $programIds === []
+                    ? $query->whereRaw('1 = 0')
+                    : $query->whereIn('scholarship_program_id', $programIds);
+            })
             ->when($riskLabel !== null && $riskLabel !== '', fn ($query) => $query->where('risk_label', $riskLabel))
             ->when($renewalStatus !== null && $renewalStatus !== '', fn ($query) => $query->where('renewal_status', $renewalStatus))
             ->when($search !== '', function ($query) use ($search): void {
@@ -54,7 +61,7 @@ class ScholarController extends Controller
      */
     public function show(Scholar $scholar): JsonResponse
     {
-        abort_unless(request()->user()?->isAdmin() || $scholar->user_id === request()->user()?->id, 403);
+        abort_unless($this->canAccessScholar(request()->user(), $scholar), 403);
 
         return response()->json([
             'scholar' => new ScholarResource($scholar->loadMissing(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])),
@@ -66,6 +73,8 @@ class ScholarController extends Controller
      */
     public function updateCompliance(UpdateScholarComplianceRequest $request, Scholar $scholar): JsonResponse
     {
+        abort_unless($this->canAccessScholar($request->user(), $scholar), 403);
+
         $validated = $request->validated();
         $original = $scholar->only([
             'compliance_status',
@@ -126,7 +135,7 @@ class ScholarController extends Controller
     {
         $currentUser = $request->user();
 
-        abort_unless($currentUser?->isAdmin() || $scholar->user_id === $currentUser?->id, 403);
+        abort_unless($this->canAccessScholar($currentUser, $scholar), 403);
 
         $validated = $request->validate([
             'grades' => ['required', 'array', 'min:1'],
@@ -178,6 +187,8 @@ class ScholarController extends Controller
             'submissions' => $submissions,
         ]);
 
+        $this->notifyOfficersOfSemesterSubmission($scholar->refresh());
+
         return response()->json([
             'scholar' => new ScholarResource($scholar->refresh()->loadMissing(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])),
         ]);
@@ -193,6 +204,13 @@ class ScholarController extends Controller
         $requestedAt = now()->toISOString();
         $scholars = Scholar::query()
             ->whereIn('scholarship_status', ['Active Scholar', 'Active', 'Pending Renewal', 'Under Renewal Review'])
+            ->when($request->user()?->isOfficer() && ! $request->user()?->isSuperAdmin(), function ($query) use ($request): void {
+                $programIds = $this->assignedProgramIds($request->user());
+
+                $programIds === []
+                    ? $query->whereRaw('1 = 0')
+                    : $query->whereIn('scholarship_program_id', $programIds);
+            })
             ->get();
 
         $scholars->each(function (Scholar $scholar) use ($requestedAt): void {
@@ -233,6 +251,8 @@ class ScholarController extends Controller
      */
     public function sendRequirementRequest(StoreRequirementRequest $request, Scholar $scholar): JsonResponse
     {
+        abort_unless($this->canAccessScholar($request->user(), $scholar), 403);
+
         $validated = $request->validated();
         $requirements = $validated['requirements'];
         $message = $validated['message'] ?? 'Please submit the requested requirements.';
@@ -381,7 +401,7 @@ class ScholarController extends Controller
     /**
      * Notify a scholar when an officer updates compliance or semester validation.
      *
-     * @param array<string, mixed> $original
+     * @param  array<string, mixed>  $original
      */
     private function notifyScholarOfComplianceUpdate(Scholar $scholar, array $original, ?string $officerNotes): void
     {
@@ -420,6 +440,28 @@ class ScholarController extends Controller
                 'complianceStatus' => $scholar->compliance_status,
                 'renewalStatus' => $scholar->renewal_status,
                 'scholarshipStatus' => $scholar->scholarship_status,
+            ],
+        ]);
+    }
+
+    /**
+     * Notify officers that an active scholar submitted semester requirements.
+     */
+    private function notifyOfficersOfSemesterSubmission(Scholar $scholar): void
+    {
+        $semester = $scholar->semester ?: 'current semester';
+
+        ScholarshipNotification::create([
+            'user_id' => null,
+            'role' => 'officer',
+            'type' => 'task',
+            'title' => 'Semester Requirements Submitted',
+            'message' => "{$scholar->name} submitted COE, COR, and encoded grades for {$semester}.",
+            'notified_at' => now(),
+            'payload' => [
+                'scholarId' => $scholar->id,
+                'programId' => $scholar->scholarship_program_id,
+                'applicationId' => $scholar->scholarship_application_id,
             ],
         ]);
     }
@@ -596,7 +638,7 @@ class ScholarController extends Controller
     /**
      * Normalize submitted grade rows into one predictable JSON shape.
      *
-     * @param array<int, array<string, mixed>> $grades
+     * @param  array<int, array<string, mixed>>  $grades
      * @return array<int, array<string, mixed>>
      */
     private function normalizeGradeRows(array $grades): array
@@ -619,7 +661,7 @@ class ScholarController extends Controller
     /**
      * Compute a weighted average using units.
      *
-     * @param array<int, array<string, mixed>> $grades
+     * @param  array<int, array<string, mixed>>  $grades
      */
     private function computeAverage(array $grades): ?float
     {
@@ -637,8 +679,8 @@ class ScholarController extends Controller
     /**
      * Store encoded grades as a semester submission entry.
      *
-     * @param array<int, array<string, mixed>> $submissions
-     * @param array<int, array<string, mixed>> $grades
+     * @param  array<int, array<string, mixed>>  $submissions
+     * @param  array<int, array<string, mixed>>  $grades
      * @return array<int, array<string, mixed>>
      */
     private function saveEncodedGradesSubmission(array $submissions, array $grades, ?float $average, string $status): array
@@ -662,7 +704,7 @@ class ScholarController extends Controller
     /**
      * Update persisted requirement statuses without losing uploaded-grade rows.
      *
-     * @param array<int, array<string, mixed>> $submissions
+     * @param  array<int, array<string, mixed>>  $submissions
      * @return array<int, array<string, mixed>>
      */
     private function updateRequirementStatuses(array $submissions, ?string $coeStatus, ?string $corStatus, ?string $gradesStatus): array
@@ -705,7 +747,7 @@ class ScholarController extends Controller
     /**
      * Reset semester-cycle requirements without carrying over old uploads or grades.
      *
-     * @param array<int, array<string, mixed>> $submissions
+     * @param  array<int, array<string, mixed>>  $submissions
      * @return array<int, array<string, mixed>>
      */
     private function resetSemesterRequirementSubmissions(array $submissions, string $requestedAt): array
@@ -751,7 +793,7 @@ class ScholarController extends Controller
     /**
      * Build a fresh compliance row payload from current uploads and encoded grades.
      *
-     * @param array<int, array<string, mixed>> $grades
+     * @param  array<int, array<string, mixed>>  $grades
      * @return array<int, array<string, mixed>>
      */
     private function buildComplianceSubmissionEntries(Scholar $scholar, array $grades, ?float $average, string $status, string $submittedAt): array
@@ -850,9 +892,39 @@ class ScholarController extends Controller
     }
 
     /**
+     * Check whether a user can access one scholar record.
+     */
+    private function canAccessScholar($user, Scholar $scholar): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        if ($user->isOfficer()) {
+            return in_array((int) $scholar->scholarship_program_id, $this->assignedProgramIds($user), true);
+        }
+
+        return $scholar->user_id === $user->id;
+    }
+
+    /**
+     * Return assigned scholarship program ids for an officer.
+     *
+     * @return array<int, int>
+     */
+    private function assignedProgramIds($user): array
+    {
+        return array_values(array_map('intval', $user->assigned_program_ids ?? []));
+    }
+
+    /**
      * Return a requirement status from a normalized submission list.
      *
-     * @param array<int, array<string, mixed>> $submissions
+     * @param  array<int, array<string, mixed>>  $submissions
      */
     private function submissionStatusFromList(array $submissions, string $key): ?string
     {
@@ -870,7 +942,7 @@ class ScholarController extends Controller
     /**
      * Pull encoded grade rows from a submission list.
      *
-     * @param array<int, array<string, mixed>> $submissions
+     * @param  array<int, array<string, mixed>>  $submissions
      * @return array<int, array<string, mixed>>
      */
     private function gradesFromSubmissions(array $submissions): array
@@ -885,11 +957,12 @@ class ScholarController extends Controller
 
         return [];
     }
+
     /**
      * Merge a submission entry by key or requirement name.
      *
-     * @param array<int, array<string, mixed>> $submissions
-     * @param array<string, mixed> $entry
+     * @param  array<int, array<string, mixed>>  $submissions
+     * @param  array<string, mixed>  $entry
      * @return array<int, array<string, mixed>>
      */
     private function updateSubmissionByKey(array $submissions, string $key, array $entry): array

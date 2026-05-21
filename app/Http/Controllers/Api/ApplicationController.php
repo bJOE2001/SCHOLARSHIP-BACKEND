@@ -49,7 +49,7 @@ class ApplicationController extends Controller
     {
         $validated = $request->validated();
         $currentUser = $request->user();
-        $studentId = $currentUser?->isAdmin() ? (int) $validated['studentId'] : (int) $currentUser->id;
+        $studentId = $currentUser?->isSuperAdmin() ? (int) $validated['studentId'] : (int) $currentUser->id;
         $programId = (int) $validated['programId'];
         $student = User::query()->findOrFail($studentId);
         $program = ScholarshipProgram::query()->findOrFail($programId);
@@ -96,6 +96,8 @@ class ApplicationController extends Controller
         $validated = $request->validated();
         $currentUser = $request->user();
 
+        abort_unless($this->canAccessApplication($currentUser, $application), 403);
+
         $application->fill([
             'status' => $validated['status'],
             'remarks' => $validated['remarks'] ?? $application->remarks,
@@ -136,10 +138,7 @@ class ApplicationController extends Controller
         $validated = $request->validated();
         $currentUser = $request->user();
 
-        abort_unless(
-            $currentUser?->isAdmin() || $application->applicant_id === $currentUser?->id,
-            403,
-        );
+        abort_unless($this->canAccessApplication($currentUser, $application), 403);
 
         $file = $request->file('file');
         $documentPath = null;
@@ -181,6 +180,8 @@ class ApplicationController extends Controller
             'missing_requirements' => $applicationRequirements,
         ]);
 
+        $this->notifyOfficersOfDocumentUpload($document->refresh(), $application->fresh(['program']));
+
         return response()->json([
             'application' => new ScholarshipApplicationResource($application->fresh(['documents', 'applicant', 'program'])),
             'documents' => ApplicationDocumentResource::collection($application->documents()->orderBy('name')->get()),
@@ -194,10 +195,7 @@ class ApplicationController extends Controller
     {
         $currentUser = $request->user();
 
-        abort_unless(
-            $currentUser?->isAdmin() || $application->applicant_id === $currentUser?->id,
-            403,
-        );
+        abort_unless($this->canAccessApplication($currentUser, $application), 403);
 
         if (! in_array($application->status, ['Draft', 'For Revision', 'Needs Revision'], true)) {
             return response()->json([
@@ -234,6 +232,8 @@ class ApplicationController extends Controller
         $application->appendTimelineEvent($nextStatus, $remarks);
         $application->save();
 
+        $this->notifyOfficersOfSubmittedApplication($application->fresh(['program']));
+
         return response()->json([
             'application' => new ScholarshipApplicationResource($application->fresh(['documents', 'applicant', 'program'])),
         ]);
@@ -247,7 +247,44 @@ class ApplicationController extends Controller
         $currentUser = $request->user();
 
         return ScholarshipApplication::query()
-            ->when($currentUser?->isStudent(), fn ($query) => $query->where('applicant_id', $currentUser->id));
+            ->when($currentUser?->isStudent(), fn ($query) => $query->where('applicant_id', $currentUser->id))
+            ->when($currentUser?->isOfficer() && ! $currentUser?->isSuperAdmin(), function ($query) use ($currentUser): void {
+                $programIds = $this->assignedProgramIds($currentUser);
+
+                $programIds === []
+                    ? $query->whereRaw('1 = 0')
+                    : $query->whereIn('scholarship_program_id', $programIds);
+            });
+    }
+
+    /**
+     * Check whether the signed-in user can manage an application.
+     */
+    private function canAccessApplication(?User $user, ScholarshipApplication $application): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        if ($user->isOfficer()) {
+            return in_array((int) $application->scholarship_program_id, $this->assignedProgramIds($user), true);
+        }
+
+        return $application->applicant_id === $user->id;
+    }
+
+    /**
+     * Return assigned scholarship program ids for an officer.
+     *
+     * @return array<int, int>
+     */
+    private function assignedProgramIds(User $user): array
+    {
+        return array_values(array_map('intval', $user->assigned_program_ids ?? []));
     }
 
     /**
@@ -573,6 +610,52 @@ class ApplicationController extends Controller
                 'applicationId' => $application->id,
                 'programId' => $application->scholarship_program_id,
                 'status' => $application->status,
+            ],
+        ]);
+    }
+
+    /**
+     * Notify officers that an application is ready for review.
+     */
+    private function notifyOfficersOfSubmittedApplication(ScholarshipApplication $application): void
+    {
+        $application->loadMissing('program');
+        $programName = $application->program?->name ?? 'a scholarship program';
+
+        ScholarshipNotification::create([
+            'user_id' => null,
+            'role' => 'officer',
+            'type' => 'task',
+            'title' => 'New Application Submitted',
+            'message' => "{$application->application_no} for {$programName} is ready for initial screening.",
+            'notified_at' => now(),
+            'payload' => [
+                'applicationId' => $application->id,
+                'programId' => $application->scholarship_program_id,
+                'status' => $application->status,
+            ],
+        ]);
+    }
+
+    /**
+     * Notify officers that a requirement document needs validation.
+     */
+    private function notifyOfficersOfDocumentUpload(ApplicationDocument $document, ScholarshipApplication $application): void
+    {
+        $application->loadMissing('program');
+        $programName = $application->program?->name ?? 'a scholarship program';
+
+        ScholarshipNotification::create([
+            'user_id' => null,
+            'role' => 'officer',
+            'type' => 'task',
+            'title' => 'Document Pending Validation',
+            'message' => "{$document->name} for {$application->application_no} ({$programName}) is awaiting validation.",
+            'notified_at' => now(),
+            'payload' => [
+                'applicationId' => $application->id,
+                'documentId' => $document->id,
+                'programId' => $application->scholarship_program_id,
             ],
         ]);
     }

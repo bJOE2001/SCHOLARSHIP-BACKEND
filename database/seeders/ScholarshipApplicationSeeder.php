@@ -17,11 +17,11 @@ class ScholarshipApplicationSeeder extends Seeder
         $studentOne = User::query()->where('email', 'student1@example.com')->firstOrFail();
         $studentTwo = User::query()->where('email', 'student2@example.com')->firstOrFail();
         $studentThree = User::query()->where('email', 'student3@example.com')->firstOrFail();
-        $programOne = ScholarshipProgram::query()->where('name', 'Merit Scholars Grant')->firstOrFail();
-        $programTwo = ScholarshipProgram::query()->where('name', 'STEM Excellence Scholarship')->firstOrFail();
-        $programThree = ScholarshipProgram::query()->where('name', 'Community Service Grant')->firstOrFail();
-        $programFour = ScholarshipProgram::query()->where('name', 'Academic Support Fund')->firstOrFail();
-        $adminUser = User::query()->where('email', 'admin@example.com')->firstOrFail();
+        $programOne = ScholarshipProgram::query()->where('provider', 'TDP')->firstOrFail();
+        $programTwo = ScholarshipProgram::query()->where('provider', 'TES')->firstOrFail();
+        $programThree = ScholarshipProgram::query()->where('provider', 'DOST')->firstOrFail();
+        $programFour = ScholarshipProgram::query()->where('provider', 'EAP')->firstOrFail();
+        $headOfficer = User::query()->where('email', 'head.officer@example.com')->firstOrFail();
 
         ScholarshipApplication::create([
             'scholarship_program_id' => $programOne->id,
@@ -84,7 +84,7 @@ class ScholarshipApplicationSeeder extends Seeder
             ],
             'submitted_at' => now()->subDays(6),
             'reviewed_at' => now()->subDays(1),
-            'reviewed_by_id' => $adminUser->id,
+            'reviewed_by_id' => $headOfficer->id,
         ]);
 
         ScholarshipApplication::create([
@@ -114,7 +114,7 @@ class ScholarshipApplicationSeeder extends Seeder
             ],
             'submitted_at' => now()->subWeeks(3),
             'reviewed_at' => now()->subWeeks(2),
-            'reviewed_by_id' => $adminUser->id,
+            'reviewed_by_id' => $headOfficer->id,
         ]);
 
         ScholarshipApplication::create([
@@ -150,7 +150,7 @@ class ScholarshipApplicationSeeder extends Seeder
             ],
             'submitted_at' => now()->subMonth(),
             'reviewed_at' => now()->subWeeks(3),
-            'reviewed_by_id' => $adminUser->id,
+            'reviewed_by_id' => $headOfficer->id,
         ]);
 
         ScholarshipApplication::create([
@@ -186,7 +186,7 @@ class ScholarshipApplicationSeeder extends Seeder
             ],
             'submitted_at' => now()->subWeeks(5),
             'reviewed_at' => now()->subWeeks(4),
-            'reviewed_by_id' => $adminUser->id,
+            'reviewed_by_id' => $headOfficer->id,
         ]);
 
         ScholarshipProgram::query()->get()->each(function (ScholarshipProgram $program): void {

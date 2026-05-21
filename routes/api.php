@@ -41,7 +41,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/scholars/{scholar}', [ScholarController::class, 'show']);
     Route::post('/scholars/{scholar}/semester-requirements', [ScholarController::class, 'submitSemesterRequirements']);
 
-    Route::middleware('role:admin,officer')->group(function (): void {
+    Route::middleware('role:head_officer,officer')->group(function (): void {
         Route::post('/notifications', [NotificationController::class, 'store']);
 
         Route::apiResource('users', UserController::class)->only(['index', 'store', 'show', 'update']);

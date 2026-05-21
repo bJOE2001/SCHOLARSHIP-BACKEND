@@ -23,8 +23,16 @@ class ProgramController extends Controller
         $currentUser = $request->user('sanctum');
 
         $programs = ScholarshipProgram::query()
+            ->with('assignedOfficers:id')
             ->when($publishedOnly || $currentUser === null, function ($query): void {
                 $query->whereIn('status', ['Open', 'Closing Soon']);
+            })
+            ->when($currentUser?->isOfficer() && ! $currentUser?->isSuperAdmin(), function ($query) use ($currentUser): void {
+                $programIds = $this->assignedProgramIds($currentUser);
+
+                $programIds === []
+                    ? $query->whereRaw('1 = 0')
+                    : $query->whereIn('id', $programIds);
             })
             ->when($status !== null && $status !== '', fn ($query) => $query->where('status', $status))
             ->when($search !== '', function ($query) use ($search): void {
@@ -50,7 +58,10 @@ class ProgramController extends Controller
      */
     public function store(StoreProgramRequest $request): JsonResponse
     {
-        $program = ScholarshipProgram::create($this->mapProgramAttributes($request->validated(), true));
+        $validated = $request->validated();
+        $program = ScholarshipProgram::create($this->mapProgramAttributes($validated, true));
+
+        $this->syncAssignedOfficers($program, $this->assignedOfficerIdsFromPayload($validated) ?? []);
 
         return response()->json([
             'program' => new ScholarshipProgramResource($program),
@@ -62,6 +73,10 @@ class ProgramController extends Controller
      */
     public function show(ScholarshipProgram $program): JsonResponse
     {
+        $currentUser = request()->user('sanctum');
+
+        abort_unless($this->canAccessProgram($currentUser, $program), 403);
+
         return response()->json([
             'program' => new ScholarshipProgramResource($program),
         ]);
@@ -72,13 +87,15 @@ class ProgramController extends Controller
      */
     public function update(UpdateProgramRequest $request, ScholarshipProgram $program): JsonResponse
     {
-        $program->fill($this->mapProgramAttributes($request->validated()));
+        $validated = $request->validated();
+        $program->fill($this->mapProgramAttributes($validated));
 
         if ($program->status === 'Open' && $program->published_at === null) {
             $program->published_at = now();
         }
 
         $program->save();
+        $this->syncAssignedOfficers($program, $this->assignedOfficerIdsFromPayload($validated));
 
         return response()->json([
             'program' => new ScholarshipProgramResource($program),
@@ -90,6 +107,8 @@ class ProgramController extends Controller
      */
     public function publish(ScholarshipProgram $program): JsonResponse
     {
+        abort_unless(request()->user()?->isSuperAdmin(), 403);
+
         $program->update([
             'status' => 'Open',
             'published_at' => now(),
@@ -105,6 +124,8 @@ class ProgramController extends Controller
      */
     public function assignAdmins(Request $request, ScholarshipProgram $program): JsonResponse
     {
+        abort_unless($request->user()?->isSuperAdmin(), 403);
+
         $validated = $request->validate([
             'officerId' => ['nullable', 'integer', 'exists:users,id'],
             'adminIds' => ['nullable', 'array'],
@@ -120,12 +141,7 @@ class ProgramController extends Controller
             ?? $validated['adminIds']
             ?? (isset($validated['officerId']) ? [$validated['officerId']] : []);
 
-        $program->update([
-            'assigned_admin_ids' => array_values(array_unique(array_map(
-                static fn (mixed $userId): int => (int) $userId,
-                $assignedAdminIds,
-            ))),
-        ]);
+        $this->syncAssignedOfficers($program, $assignedAdminIds);
 
         return response()->json([
             'program' => new ScholarshipProgramResource($program),
@@ -166,20 +182,8 @@ class ProgramController extends Controller
             }
         }
 
-        $assignedAdminIds = $validated['assignedAdminIds']
-            ?? $validated['assignedOfficerIds']
-            ?? null;
-
-        if ($assignedAdminIds !== null) {
-            $attributes['assigned_admin_ids'] = array_values(array_unique(array_map(
-                static fn (mixed $userId): int => (int) $userId,
-                $assignedAdminIds,
-            )));
-        }
-
         if ($isCreation) {
             $attributes['used_slots'] = $attributes['used_slots'] ?? 0;
-            $attributes['assigned_admin_ids'] = $attributes['assigned_admin_ids'] ?? [];
 
             if (($attributes['status'] ?? 'Closed') === 'Open') {
                 $attributes['published_at'] = now();
@@ -187,5 +191,72 @@ class ProgramController extends Controller
         }
 
         return $attributes;
+    }
+
+    /**
+     * Check whether a user can view one program.
+     */
+    private function canAccessProgram($user, ScholarshipProgram $program): bool
+    {
+        if ($user === null) {
+            return in_array($program->status, ['Open', 'Closing Soon'], true);
+        }
+
+        if ($user->isSuperAdmin() || $user->isStudent()) {
+            return true;
+        }
+
+        if ($user->isOfficer()) {
+            $programIds = $this->assignedProgramIds($user);
+
+            return in_array((int) $program->id, $programIds, true);
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private function assignedProgramIds($user): array
+    {
+        return $user->assignedPrograms()
+            ->pluck('scholarship_programs.id')
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->all();
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array<int, mixed>|null
+     */
+    private function assignedOfficerIdsFromPayload(array $validated): ?array
+    {
+        return $validated['assignedAdminIds'] ?? $validated['assignedOfficerIds'] ?? null;
+    }
+
+    /**
+     * @param  array<int, mixed>|null  $userIds
+     */
+    private function syncAssignedOfficers(ScholarshipProgram $program, ?array $userIds): void
+    {
+        if ($userIds === null) {
+            return;
+        }
+
+        $program->assignedOfficers()->sync($this->normalizeUserIds($userIds));
+        $program->unsetRelation('assignedOfficers');
+    }
+
+    /**
+     * @param  array<int, mixed>  $userIds
+     * @return array<int, int>
+     */
+    private function normalizeUserIds(array $userIds): array
+    {
+        return array_values(array_unique(array_map(
+            static fn (mixed $userId): int => (int) $userId,
+            $userIds,
+        )));
     }
 }

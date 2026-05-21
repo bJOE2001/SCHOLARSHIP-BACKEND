@@ -35,12 +35,12 @@ class ScholarshipNotificationFactory extends Factory
     }
 
     /**
-     * Target an administrator notification.
+     * Target a head officer notification.
      */
-    public function admin(): static
+    public function headOfficer(): static
     {
         return $this->state(fn (array $attributes) => [
-            'role' => 'admin',
+            'role' => 'head_officer',
             'type' => 'admin',
         ]);
     }

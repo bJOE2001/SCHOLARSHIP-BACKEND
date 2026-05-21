@@ -5,16 +5,25 @@ namespace App\Models;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
+
+    /**
+     * Program ids supplied through legacy mass-assignment payloads.
+     *
+     * @var array<int, int>|null
+     */
+    protected ?array $pendingAssignedProgramIds = null;
 
     /**
      * The attributes that are mass assignable.
@@ -57,7 +66,6 @@ class User extends Authenticatable
         'siblings',
         'studying_siblings',
         'income_bracket',
-        'assigned_program_ids',
     ];
 
     /**
@@ -84,9 +92,24 @@ class User extends Authenticatable
             'family_income' => 'float',
             'siblings' => 'integer',
             'studying_siblings' => 'integer',
-            'assigned_program_ids' => 'array',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Sync legacy assigned_program_ids payloads to the normalized pivot table.
+     */
+    protected static function booted(): void
+    {
+        static::saved(function (User $user): void {
+            if ($user->pendingAssignedProgramIds === null || ! Schema::hasTable('scholarship_program_user')) {
+                return;
+            }
+
+            $user->assignedPrograms()->sync($user->pendingAssignedProgramIds);
+            $user->unsetRelation('assignedPrograms');
+            $user->pendingAssignedProgramIds = null;
+        });
     }
 
     /**
@@ -130,11 +153,30 @@ class User extends Authenticatable
     }
 
     /**
-     * Determine whether the user is an administrator.
+     * Get scholarship programs assigned to this officer.
+     *
+     * @return BelongsToMany<ScholarshipProgram, $this>
+     */
+    public function assignedPrograms(): BelongsToMany
+    {
+        return $this->belongsToMany(ScholarshipProgram::class, 'scholarship_program_user')
+            ->withTimestamps();
+    }
+
+    /**
+     * Determine whether the user can access the officer workspace.
      */
     public function isAdmin(): bool
     {
-        return in_array($this->role, ['admin', 'officer'], true);
+        return in_array($this->role, ['head_officer', 'officer'], true);
+    }
+
+    /**
+     * Determine whether the user can access every scholarship program and manage system users.
+     */
+    public function isSuperAdmin(): bool
+    {
+        return $this->role === 'head_officer';
     }
 
     /**
@@ -143,6 +185,14 @@ class User extends Authenticatable
     public function isStudent(): bool
     {
         return $this->role === 'student';
+    }
+
+    /**
+     * Determine whether the user is a scholarship officer.
+     */
+    public function isOfficer(): bool
+    {
+        return in_array($this->role, ['head_officer', 'officer'], true);
     }
 
     /**
@@ -160,6 +210,23 @@ class User extends Authenticatable
     }
 
     /**
+     * Keep the old assigned_program_ids attribute API backed by the pivot table.
+     */
+    protected function assignedProgramIds(): Attribute
+    {
+        return Attribute::make(
+            get: fn (): array => $this->relationLoaded('assignedPrograms')
+                ? $this->assignedPrograms->pluck('id')->map(static fn (mixed $id): int => (int) $id)->all()
+                : $this->assignedPrograms()->pluck('scholarship_programs.id')->map(static fn (mixed $id): int => (int) $id)->all(),
+            set: function (mixed $value): array {
+                $this->pendingAssignedProgramIds = $this->normalizeProgramIds($value);
+
+                return [];
+            },
+        );
+    }
+
+    /**
      * Build initials from a display name.
      */
     protected function initialsFromName(string $name): string
@@ -171,5 +238,20 @@ class User extends Authenticatable
             ->implode('');
 
         return strtoupper($initials ?: 'U');
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private function normalizeProgramIds(mixed $programIds): array
+    {
+        if (! is_array($programIds)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(
+            array_map(static fn (mixed $programId): int => (int) $programId, $programIds),
+            static fn (int $programId): bool => $programId > 0,
+        )));
     }
 }

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Api;
 
 use App\Models\ApplicationDocument;
+use App\Models\Scholar;
 use App\Models\ScholarshipApplication;
 use App\Models\ScholarshipNotification;
 use App\Models\ScholarshipProgram;
@@ -42,6 +43,36 @@ class ScholarshipApiTest extends TestCase
             ],
         ]);
         $response->assertJsonPath('user.role', 'student');
+    }
+
+    public function test_student_can_register_with_profile_details_and_login_with_birthdate_password(): void
+    {
+        $response = $this->postJson('/api/auth/register', [
+            'fullName' => 'Register Student',
+            'email' => 'register.student@example.com',
+            'birthDate' => '2004-05-12',
+            'gender' => 'Female',
+            'schoolName' => 'ScholarSync State University',
+            'studentId' => 'REG-2026-0001',
+            'course' => 'BSIT',
+            'yearLevel' => '2nd Year',
+            'semester' => '1st Semester',
+            'academicYear' => '2025-2026',
+            'gpa' => 95,
+            'enrollmentStatus' => 'Currently Enrolled',
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('user.role', 'student');
+        $response->assertJsonPath('user.email', 'register.student@example.com');
+
+        $loginResponse = $this->postJson('/api/auth/login', [
+            'email' => 'register.student@example.com',
+            'password' => '051204',
+        ]);
+
+        $loginResponse->assertOk();
+        $loginResponse->assertJsonPath('user.email', 'register.student@example.com');
     }
 
     public function test_authenticated_user_can_logout_without_server_error(): void
@@ -241,17 +272,17 @@ class ScholarshipApiTest extends TestCase
         ]);
     }
 
-    public function test_admin_can_create_user_and_assign_programs(): void
+    public function test_head_officer_can_create_user_and_assign_programs(): void
     {
-        $adminUser = User::factory()->admin()->create([
-            'name' => 'Admin User',
-            'email' => 'admin.user@example.com',
+        $headOfficer = User::factory()->headOfficer()->create([
+            'name' => 'Head Officer User',
+            'email' => 'head.officer.user@example.com',
             'password' => 'password',
         ]);
         $firstProgram = $this->createProgram('Assigned Program One');
         $secondProgram = $this->createProgram('Assigned Program Two');
 
-        Sanctum::actingAs($adminUser);
+        Sanctum::actingAs($headOfficer);
 
         $createResponse = $this->postJson('/api/users', [
             'name' => 'New Officer',
@@ -274,11 +305,11 @@ class ScholarshipApiTest extends TestCase
         $assignResponse->assertJsonPath('user.assignedProgramIds.1', $secondProgram->id);
     }
 
-    public function test_admin_can_send_notification_to_one_student(): void
+    public function test_head_officer_can_send_notification_to_one_student(): void
     {
-        $adminUser = User::factory()->admin()->create([
-            'name' => 'Notification Admin',
-            'email' => 'notification.admin@example.com',
+        $headOfficer = User::factory()->headOfficer()->create([
+            'name' => 'Notification Head Officer',
+            'email' => 'notification.head.officer@example.com',
             'password' => 'password',
         ]);
         $studentUser = User::factory()->create([
@@ -294,7 +325,7 @@ class ScholarshipApiTest extends TestCase
             'role' => 'student',
         ]);
 
-        Sanctum::actingAs($adminUser);
+        Sanctum::actingAs($headOfficer);
 
         $response = $this->postJson('/api/notifications', [
             'userId' => $studentUser->id,
@@ -330,11 +361,11 @@ class ScholarshipApiTest extends TestCase
         $otherStudentResponse->assertJsonCount(0, 'notifications');
     }
 
-    public function test_admin_can_accept_application_and_create_scholar_record(): void
+    public function test_head_officer_can_accept_application_and_create_scholar_record(): void
     {
-        $adminUser = User::factory()->admin()->create([
-            'name' => 'Review Admin',
-            'email' => 'review.admin@example.com',
+        $headOfficer = User::factory()->headOfficer()->create([
+            'name' => 'Review Head Officer',
+            'email' => 'review.head.officer@example.com',
             'password' => 'password',
         ]);
         $studentUser = User::factory()->create([
@@ -399,7 +430,7 @@ class ScholarshipApiTest extends TestCase
             'uploaded_at' => now()->subDay(),
         ]);
 
-        Sanctum::actingAs($adminUser);
+        Sanctum::actingAs($headOfficer);
 
         $response = $this->patchJson("/api/applications/{$application->id}/status", [
             'status' => 'Accepted',
@@ -422,6 +453,129 @@ class ScholarshipApiTest extends TestCase
             'type' => 'success',
             'title' => 'Application Status Updated',
         ]);
+    }
+
+    public function test_officer_only_sees_assigned_program_applications_programs_and_scholars(): void
+    {
+        $tdpProgram = $this->createProgram('TDP Program');
+        $chedProgram = $this->createProgram('CHED Program');
+        $officer = User::factory()->create([
+            'name' => 'TDP Officer',
+            'email' => 'tdp.officer@example.com',
+            'password' => 'password',
+            'role' => 'officer',
+            'assigned_program_ids' => [$tdpProgram->id],
+        ]);
+        $student = User::factory()->create([
+            'name' => 'Scoped Student',
+            'email' => 'scoped.student@example.com',
+            'password' => 'password',
+            'role' => 'student',
+        ]);
+
+        $tdpApplication = ScholarshipApplication::create([
+            'scholarship_program_id' => $tdpProgram->id,
+            'applicant_id' => $student->id,
+            'application_no' => 'APP-TDP-001',
+            'status' => 'Submitted',
+            'risk_label' => 'Stable',
+            'score' => 80,
+            'progress' => 35,
+            'remarks' => 'Submitted.',
+            'next_action' => 'Validate documents.',
+            'missing_requirements' => [],
+            'timeline' => [],
+        ]);
+        $chedApplication = ScholarshipApplication::create([
+            'scholarship_program_id' => $chedProgram->id,
+            'applicant_id' => $student->id,
+            'application_no' => 'APP-CHED-001',
+            'status' => 'Submitted',
+            'risk_label' => 'Stable',
+            'score' => 80,
+            'progress' => 35,
+            'remarks' => 'Submitted.',
+            'next_action' => 'Validate documents.',
+            'missing_requirements' => [],
+            'timeline' => [],
+        ]);
+        Scholar::create([
+            'user_id' => $student->id,
+            'scholarship_program_id' => $tdpProgram->id,
+            'scholarship_application_id' => $tdpApplication->id,
+            'scholar_id' => 'SCH-TDP-001',
+            'name' => 'TDP Scholar',
+            'email' => 'tdp.scholar@example.com',
+            'program' => $tdpProgram->name,
+            'scholarship_status' => 'Active Scholar',
+            'renewal_status' => 'Active Scholar',
+            'compliance_status' => 'Compliant',
+            'compliance_rate' => 100,
+            'risk_label' => 'Low Risk',
+            'submissions' => [],
+        ]);
+        Scholar::create([
+            'user_id' => $student->id,
+            'scholarship_program_id' => $chedProgram->id,
+            'scholarship_application_id' => $chedApplication->id,
+            'scholar_id' => 'SCH-CHED-001',
+            'name' => 'CHED Scholar',
+            'email' => 'ched.scholar@example.com',
+            'program' => $chedProgram->name,
+            'scholarship_status' => 'Active Scholar',
+            'renewal_status' => 'Active Scholar',
+            'compliance_status' => 'Compliant',
+            'compliance_rate' => 100,
+            'risk_label' => 'Low Risk',
+            'submissions' => [],
+        ]);
+
+        Sanctum::actingAs($officer);
+
+        $this->getJson('/api/programs')
+            ->assertOk()
+            ->assertJsonCount(1, 'programs')
+            ->assertJsonPath('programs.0.name', 'TDP Program');
+
+        $this->getJson('/api/applications')
+            ->assertOk()
+            ->assertJsonCount(1, 'applications')
+            ->assertJsonPath('applications.0.applicationNo', 'APP-TDP-001');
+
+        $this->getJson('/api/scholars')
+            ->assertOk()
+            ->assertJsonCount(1, 'scholars')
+            ->assertJsonPath('scholars.0.program', 'TDP Program');
+    }
+
+    public function test_officer_cannot_manage_users_or_create_programs(): void
+    {
+        $program = $this->createProgram('Officer Assigned Program');
+        $officer = User::factory()->create([
+            'name' => 'Limited Officer',
+            'email' => 'limited.officer@example.com',
+            'password' => 'password',
+            'role' => 'officer',
+            'assigned_program_ids' => [$program->id],
+        ]);
+
+        Sanctum::actingAs($officer);
+
+        $this->getJson('/api/users')->assertForbidden();
+        $this->postJson('/api/users', [
+            'name' => 'Blocked Officer',
+            'email' => 'blocked.officer@example.com',
+            'role' => 'officer',
+            'programIds' => [$program->id],
+        ])->assertForbidden();
+        $this->postJson('/api/programs', [
+            'name' => 'Blocked Program',
+            'provider' => 'BLOCK',
+            'category' => 'Blocked',
+            'type' => 'Scholarship',
+            'description' => 'Should not be created by an officer.',
+            'status' => 'Open',
+        ])->assertForbidden();
     }
 
     /**

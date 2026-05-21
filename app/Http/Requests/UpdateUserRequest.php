@@ -13,7 +13,7 @@ class UpdateUserRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return $this->user()?->isAdmin() ?? false;
+        return $this->user()?->isSuperAdmin() ?? false;
     }
 
     /**
@@ -35,7 +35,7 @@ class UpdateUserRequest extends FormRequest
                 'max:255',
                 Rule::unique('users', 'email')->ignore($user?->id),
             ],
-            'role' => ['sometimes', 'required', Rule::in(['student', 'admin', 'officer'])],
+            'role' => ['sometimes', 'required', Rule::in(['student', 'head_officer', 'officer'])],
             'status' => ['sometimes', 'required', Rule::in(['Active', 'Inactive'])],
             'department' => ['nullable', 'string', 'max:255'],
             'studentId' => ['nullable', 'string', 'max:100'],
@@ -66,6 +66,10 @@ class UpdateUserRequest extends FormRequest
             'siblings' => ['nullable', 'integer', 'min:0'],
             'studyingSiblings' => ['nullable', 'integer', 'min:0'],
             'incomeBracket' => ['nullable', 'string', 'max:100'],
+            'assignedProgramIds' => ['nullable', 'array'],
+            'assignedProgramIds.*' => ['integer', 'exists:scholarship_programs,id'],
+            'programIds' => ['nullable', 'array'],
+            'programIds.*' => ['integer', 'exists:scholarship_programs,id'],
         ];
     }
 }

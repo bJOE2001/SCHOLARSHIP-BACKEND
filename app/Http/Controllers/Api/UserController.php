@@ -15,10 +15,12 @@ use Illuminate\Http\Request;
 class UserController extends Controller
 {
     /**
-     * List users for the admin interface.
+     * List users for the head officer system users interface.
      */
     public function index(Request $request): JsonResponse
     {
+        abort_unless($request->user()?->isSuperAdmin(), 403);
+
         $search = trim((string) $request->query('search', ''));
         $role = $request->query('role');
         $status = $request->query('status');
@@ -48,7 +50,10 @@ class UserController extends Controller
      */
     public function store(StoreUserRequest $request): JsonResponse
     {
-        $user = User::create($this->mapUserAttributes($request->validated(), true));
+        $validated = $request->validated();
+        $user = User::create($this->mapUserAttributes($validated, true));
+
+        $this->syncAssignedPrograms($user, $this->programIdsFromPayload($validated));
 
         return response()->json([
             'user' => new UserResource($user),
@@ -60,6 +65,8 @@ class UserController extends Controller
      */
     public function show(User $user): JsonResponse
     {
+        abort_unless(request()->user()?->isSuperAdmin(), 403);
+
         return response()->json([
             'user' => new UserResource($user),
         ]);
@@ -70,8 +77,11 @@ class UserController extends Controller
      */
     public function update(UpdateUserRequest $request, User $user): JsonResponse
     {
-        $user->fill($this->mapUserAttributes($request->validated()));
+        $validated = $request->validated();
+        $user->fill($this->mapUserAttributes($validated));
         $user->save();
+
+        $this->syncAssignedPrograms($user, $this->programIdsFromPayload($validated));
 
         return response()->json([
             'user' => new UserResource($user),
@@ -97,12 +107,7 @@ class UserController extends Controller
      */
     public function syncPrograms(SyncUserProgramsRequest $request, User $user): JsonResponse
     {
-        $user->update([
-            'assigned_program_ids' => array_values(array_unique(array_map(
-                static fn (mixed $programId): int => (int) $programId,
-                $request->validated()['programIds'],
-            ))),
-        ]);
+        $this->syncAssignedPrograms($user, $request->validated()['programIds']);
 
         return response()->json([
             'user' => new UserResource($user),
@@ -164,11 +169,48 @@ class UserController extends Controller
         if ($isCreation) {
             $attributes['password'] = 'password';
             $attributes['email_verified_at'] = now();
-            $attributes['assigned_program_ids'] = $attributes['assigned_program_ids'] ?? [];
             $attributes['status'] = $attributes['status'] ?? 'Active';
             $attributes['role'] = $attributes['role'] ?? 'student';
         }
 
         return $attributes;
+    }
+
+    /**
+     * Normalize program ids for assignment storage.
+     *
+     * @param  array<int, mixed>  $programIds
+     * @return array<int, int>
+     */
+    private function normalizeProgramIds(array $programIds): array
+    {
+        return array_values(array_unique(array_map(
+            static fn (mixed $programId): int => (int) $programId,
+            $programIds,
+        )));
+    }
+
+    /**
+     * Get program ids from either supported API key.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array<int, mixed>|null
+     */
+    private function programIdsFromPayload(array $validated): ?array
+    {
+        return $validated['programIds'] ?? $validated['assignedProgramIds'] ?? null;
+    }
+
+    /**
+     * @param  array<int, mixed>|null  $programIds
+     */
+    private function syncAssignedPrograms(User $user, ?array $programIds): void
+    {
+        if ($programIds === null) {
+            return;
+        }
+
+        $user->assignedPrograms()->sync($this->normalizeProgramIds($programIds));
+        $user->unsetRelation('assignedPrograms');
     }
 }

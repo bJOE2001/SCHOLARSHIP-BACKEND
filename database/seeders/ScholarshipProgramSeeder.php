@@ -13,7 +13,8 @@ class ScholarshipProgramSeeder extends Seeder
      */
     public function run(): void
     {
-        $adminUser = User::query()->where('email', 'admin@example.com')->firstOrFail();
+        $headOfficer = User::query()->where('email', 'head.officer@example.com')->firstOrFail();
+        $tdpOfficer = User::query()->where('email', 'tdp.officer@example.com')->firstOrFail();
         $programs = [
             ['code' => 'TDP', 'name' => 'Tulong Dunong Program', 'category' => 'Government Assistance', 'type' => 'Grant', 'slots' => 100, 'budget' => 3000000],
             ['code' => 'TES', 'name' => 'Tertiary Education Subsidy', 'category' => 'Government Subsidy', 'type' => 'Subsidy', 'slots' => 120, 'budget' => 6000000],
@@ -24,7 +25,7 @@ class ScholarshipProgramSeeder extends Seeder
         ];
 
         foreach ($programs as $index => $program) {
-            ScholarshipProgram::create([
+            $scholarshipProgram = ScholarshipProgram::create([
                 'name' => $program['name'],
                 'provider' => $program['code'],
                 'category' => $program['category'],
@@ -61,9 +62,20 @@ class ScholarshipProgramSeeder extends Seeder
                     'Maintain good academic standing',
                     'Remain eligible under program rules',
                 ],
-                'assigned_admin_ids' => [$adminUser->id],
                 'published_at' => $index < 4 ? now()->subWeeks(2) : null,
             ]);
+
+            $scholarshipProgram->assignedOfficers()->sync(
+                $program['code'] === 'TDP' ? [$tdpOfficer->id] : [$headOfficer->id],
+            );
         }
+
+        $tdpOfficer->assignedPrograms()->sync(
+            ScholarshipProgram::query()
+                ->where('provider', 'TDP')
+                ->pluck('id')
+                ->map(static fn (mixed $id): int => (int) $id)
+                ->all(),
+        );
     }
 }

@@ -248,7 +248,7 @@ class ApplicationController extends Controller
 
         return ScholarshipApplication::query()
             ->when($currentUser?->isStudent(), fn ($query) => $query->where('applicant_id', $currentUser->id))
-            ->when($currentUser?->isOfficer(), function ($query) use ($currentUser): void {
+            ->when($currentUser?->isOfficer() && ! $currentUser?->isSuperAdmin(), function ($query) use ($currentUser): void {
                 $programIds = $this->assignedProgramIds($currentUser);
 
                 $programIds === []

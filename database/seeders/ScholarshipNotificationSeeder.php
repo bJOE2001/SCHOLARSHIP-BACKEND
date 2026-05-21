@@ -13,7 +13,7 @@ class ScholarshipNotificationSeeder extends Seeder
      */
     public function run(): void
     {
-        $adminUser = User::query()->where('email', 'admin@example.com')->firstOrFail();
+        $headOfficer = User::query()->where('email', 'head.officer@example.com')->firstOrFail();
         $studentOne = User::query()->where('email', 'student1@example.com')->firstOrFail();
         $studentTwo = User::query()->where('email', 'student2@example.com')->firstOrFail();
 
@@ -38,7 +38,7 @@ class ScholarshipNotificationSeeder extends Seeder
         ]);
 
         ScholarshipNotification::create([
-            'user_id' => $adminUser->id,
+            'user_id' => $headOfficer->id,
             'role' => 'officer',
             'type' => 'admin',
             'title' => 'Applications Need Review',

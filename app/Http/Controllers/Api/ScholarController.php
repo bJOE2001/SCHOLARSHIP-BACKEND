@@ -31,7 +31,7 @@ class ScholarController extends Controller
         $scholars = Scholar::query()
             ->with(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])
             ->when($currentUser?->isStudent(), fn ($query) => $query->where('user_id', $currentUser->id))
-            ->when($currentUser?->isOfficer(), function ($query) use ($currentUser): void {
+            ->when($currentUser?->isOfficer() && ! $currentUser?->isSuperAdmin(), function ($query) use ($currentUser): void {
                 $programIds = $this->assignedProgramIds($currentUser);
 
                 $programIds === []
@@ -204,7 +204,7 @@ class ScholarController extends Controller
         $requestedAt = now()->toISOString();
         $scholars = Scholar::query()
             ->whereIn('scholarship_status', ['Active Scholar', 'Active', 'Pending Renewal', 'Under Renewal Review'])
-            ->when($request->user()?->isOfficer(), function ($query) use ($request): void {
+            ->when($request->user()?->isOfficer() && ! $request->user()?->isSuperAdmin(), function ($query) use ($request): void {
                 $programIds = $this->assignedProgramIds($request->user());
 
                 $programIds === []

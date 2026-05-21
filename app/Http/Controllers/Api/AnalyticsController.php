@@ -185,7 +185,7 @@ class AnalyticsController extends Controller
     }
 
     /**
-     * Return scoped program ids, or null for super admin/all-access users.
+     * Return scoped program ids, or null for head officer/all-access users.
      *
      * @return array<int, int>|null
      */

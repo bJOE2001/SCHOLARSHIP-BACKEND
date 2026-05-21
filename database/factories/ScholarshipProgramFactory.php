@@ -71,7 +71,6 @@ class ScholarshipProgramFactory extends Factory
                 'Submit requirements every semester',
                 'Follow scholarship code of conduct',
             ],
-            'assigned_admin_ids' => [],
             'published_at' => null,
         ];
     }

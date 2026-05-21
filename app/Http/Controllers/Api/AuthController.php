@@ -153,7 +153,6 @@ class AuthController extends Controller
             'siblings' => $validated['siblings'] ?? null,
             'studying_siblings' => $validated['studyingSiblings'] ?? null,
             'income_bracket' => $validated['incomeBracket'] ?? null,
-            'assigned_program_ids' => [],
         ];
     }
 

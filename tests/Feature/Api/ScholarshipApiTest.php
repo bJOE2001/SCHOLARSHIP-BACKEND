@@ -271,17 +271,17 @@ class ScholarshipApiTest extends TestCase
         ]);
     }
 
-    public function test_admin_can_create_user_and_assign_programs(): void
+    public function test_head_officer_can_create_user_and_assign_programs(): void
     {
-        $adminUser = User::factory()->admin()->create([
-            'name' => 'Admin User',
-            'email' => 'admin.user@example.com',
+        $headOfficer = User::factory()->headOfficer()->create([
+            'name' => 'Head Officer User',
+            'email' => 'head.officer.user@example.com',
             'password' => 'password',
         ]);
         $firstProgram = $this->createProgram('Assigned Program One');
         $secondProgram = $this->createProgram('Assigned Program Two');
 
-        Sanctum::actingAs($adminUser);
+        Sanctum::actingAs($headOfficer);
 
         $createResponse = $this->postJson('/api/users', [
             'name' => 'New Officer',
@@ -304,11 +304,11 @@ class ScholarshipApiTest extends TestCase
         $assignResponse->assertJsonPath('user.assignedProgramIds.1', $secondProgram->id);
     }
 
-    public function test_admin_can_send_notification_to_one_student(): void
+    public function test_head_officer_can_send_notification_to_one_student(): void
     {
-        $adminUser = User::factory()->admin()->create([
-            'name' => 'Notification Admin',
-            'email' => 'notification.admin@example.com',
+        $headOfficer = User::factory()->headOfficer()->create([
+            'name' => 'Notification Head Officer',
+            'email' => 'notification.head.officer@example.com',
             'password' => 'password',
         ]);
         $studentUser = User::factory()->create([
@@ -324,7 +324,7 @@ class ScholarshipApiTest extends TestCase
             'role' => 'student',
         ]);
 
-        Sanctum::actingAs($adminUser);
+        Sanctum::actingAs($headOfficer);
 
         $response = $this->postJson('/api/notifications', [
             'userId' => $studentUser->id,
@@ -360,11 +360,11 @@ class ScholarshipApiTest extends TestCase
         $otherStudentResponse->assertJsonCount(0, 'notifications');
     }
 
-    public function test_admin_can_accept_application_and_create_scholar_record(): void
+    public function test_head_officer_can_accept_application_and_create_scholar_record(): void
     {
-        $adminUser = User::factory()->admin()->create([
-            'name' => 'Review Admin',
-            'email' => 'review.admin@example.com',
+        $headOfficer = User::factory()->headOfficer()->create([
+            'name' => 'Review Head Officer',
+            'email' => 'review.head.officer@example.com',
             'password' => 'password',
         ]);
         $studentUser = User::factory()->create([
@@ -429,7 +429,7 @@ class ScholarshipApiTest extends TestCase
             'uploaded_at' => now()->subDay(),
         ]);
 
-        Sanctum::actingAs($adminUser);
+        Sanctum::actingAs($headOfficer);
 
         $response = $this->patchJson("/api/applications/{$application->id}/status", [
             'status' => 'Accepted',

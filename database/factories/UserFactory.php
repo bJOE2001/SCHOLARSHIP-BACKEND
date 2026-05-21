@@ -74,7 +74,6 @@ class UserFactory extends Factory
                 'PHP 40,000 - PHP 59,999',
                 'PHP 60,000 and above',
             ]),
-            'assigned_program_ids' => [],
             'remember_token' => Str::random(10),
         ];
     }
@@ -90,21 +89,34 @@ class UserFactory extends Factory
     }
 
     /**
-     * Mark the user as an administrator.
+     * Mark the user as the head scholarship officer.
      */
-    public function admin(): static
+    public function headOfficer(): static
     {
         return $this->state(fn (array $attributes) => [
-            'role' => 'admin',
+            'role' => 'head_officer',
             'status' => 'Active',
             'department' => fake()->randomElement([
-                'Scholarship Administration',
+                'Scholarship Programs Office',
                 'Student Services',
                 'Academic Affairs',
             ]),
             'student_id' => null,
             'school_name' => null,
-            'assigned_program_ids' => [],
+        ]);
+    }
+
+    /**
+     * Mark the user as a scholarship officer.
+     */
+    public function officer(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'officer',
+            'status' => 'Active',
+            'department' => 'Scholarship Programs Office',
+            'student_id' => null,
+            'school_name' => null,
         ]);
     }
 

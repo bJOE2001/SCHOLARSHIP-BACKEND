@@ -25,7 +25,7 @@ class StoreNotificationRequest extends FormRequest
     {
         return [
             'userId' => ['nullable', 'integer', 'exists:users,id', 'required_without:role', 'prohibits:role'],
-            'role' => ['nullable', 'string', Rule::in(['student', 'admin', 'officer']), 'required_without:userId', 'prohibits:userId'],
+            'role' => ['nullable', 'string', Rule::in(['student', 'head_officer', 'officer']), 'required_without:userId', 'prohibits:userId'],
             'type' => ['required', 'string', Rule::in(['status', 'warning', 'success', 'insight', 'task', 'admin'])],
             'title' => ['required', 'string', 'max:255'],
             'message' => ['required', 'string', 'max:5000'],

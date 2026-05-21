@@ -35,7 +35,7 @@ class UpdateUserRequest extends FormRequest
                 'max:255',
                 Rule::unique('users', 'email')->ignore($user?->id),
             ],
-            'role' => ['sometimes', 'required', Rule::in(['student', 'admin', 'officer'])],
+            'role' => ['sometimes', 'required', Rule::in(['student', 'head_officer', 'officer'])],
             'status' => ['sometimes', 'required', Rule::in(['Active', 'Inactive'])],
             'department' => ['nullable', 'string', 'max:255'],
             'studentId' => ['nullable', 'string', 'max:100'],

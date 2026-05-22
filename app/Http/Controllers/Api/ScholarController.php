@@ -96,6 +96,13 @@ class ScholarController extends Controller
             $validated['corStatus'] ?? null,
             $validated['gradesStatus'] ?? null,
         );
+        $complianceSubmission = $this->latestOrCreateComplianceSubmission($scholar);
+        $academicProgression = $this->academicProgressionForComplianceApproval(
+            $scholar,
+            $complianceStatus,
+            $renewalStatus,
+            $original,
+        );
 
         $scholar->update([
             'compliance_status' => $complianceStatus,
@@ -106,9 +113,14 @@ class ScholarController extends Controller
             'risk_reason' => $this->riskReasonForCompliance($complianceStatus, $scholar),
             'compliance_rate' => $this->complianceRateForStatus($complianceStatus),
             'submissions' => $updatedSubmissions,
+            ...$academicProgression,
         ]);
 
-        $this->latestOrCreateComplianceSubmission($scholar)->update([
+        if ($academicProgression !== [] && $scholar->user) {
+            $scholar->user->update($academicProgression);
+        }
+
+        $complianceSubmission->update([
             'status' => $complianceStatus,
             'coe_status' => $this->submissionStatusFromList($updatedSubmissions, 'coe') ?? 'Missing',
             'cor_status' => $this->submissionStatusFromList($updatedSubmissions, 'cor') ?? 'Missing',
@@ -147,6 +159,9 @@ class ScholarController extends Controller
             'grades.*.grade' => ['nullable', 'numeric', 'min:0'],
             'gpa' => ['nullable', 'numeric', 'min:0'],
             'semesterSubmissionStatus' => ['nullable', 'string', 'max:255'],
+            'coeStatus' => ['nullable', 'string', 'max:255'],
+            'corStatus' => ['nullable', 'string', 'max:255'],
+            'gradesStatus' => ['nullable', 'string', 'max:255'],
         ]);
 
         $grades = $this->normalizeGradeRows($validated['grades']);
@@ -158,6 +173,11 @@ class ScholarController extends Controller
             $average,
             $validated['semesterSubmissionStatus'] ?? 'Submitted',
             $submittedAt->toISOString(),
+            [
+                'coe' => $validated['coeStatus'] ?? null,
+                'cor' => $validated['corStatus'] ?? null,
+                'encoded-grades' => $validated['gradesStatus'] ?? $validated['semesterSubmissionStatus'] ?? 'Submitted',
+            ],
         );
 
         ScholarComplianceSubmission::create([
@@ -168,7 +188,7 @@ class ScholarController extends Controller
             'status' => 'Under Review',
             'coe_status' => $this->submissionStatusFromList($submissions, 'coe') ?? 'Submitted',
             'cor_status' => $this->submissionStatusFromList($submissions, 'cor') ?? 'Submitted',
-            'grades_status' => $validated['semesterSubmissionStatus'] ?? 'Submitted',
+            'grades_status' => $this->submissionStatusFromList($submissions, 'encoded-grades') ?? 'Submitted',
             'gpa' => $average,
             'submissions' => $submissions,
             'grades' => $grades,
@@ -326,6 +346,88 @@ class ScholarController extends Controller
         }
 
         return $this->normalizeRenewalStatus($currentStatus ?: 'Active Scholar');
+    }
+
+    /**
+     * Move the scholar to the next academic period after a newly approved compliance cycle.
+     *
+     * @return array<string, string|null>
+     */
+    private function academicProgressionForComplianceApproval(Scholar $scholar, string $complianceStatus, string $renewalStatus, array $original): array
+    {
+        if ($complianceStatus !== 'Compliant' || $renewalStatus !== 'Approved') {
+            return [];
+        }
+
+        if (($original['compliance_status'] ?? null) === 'Compliant' && ($original['renewal_status'] ?? null) === 'Approved') {
+            return [];
+        }
+
+        $semester = $scholar->semester ?: '';
+
+        if ($this->isFirstSemester($semester)) {
+            return [
+                'semester' => '2nd Semester',
+            ];
+        }
+
+        if ($this->isSecondSemester($semester)) {
+            return [
+                'year_level' => $this->nextYearLevel($scholar->year_level),
+                'semester' => '1st Semester',
+                'academic_year' => $this->nextAcademicYear($scholar->academic_year),
+            ];
+        }
+
+        return [];
+    }
+
+    private function isFirstSemester(string $semester): bool
+    {
+        return str_contains(strtolower($semester), '1st') || str_contains(strtolower($semester), 'first');
+    }
+
+    private function isSecondSemester(string $semester): bool
+    {
+        return str_contains(strtolower($semester), '2nd') || str_contains(strtolower($semester), 'second');
+    }
+
+    private function nextYearLevel(?string $yearLevel): ?string
+    {
+        if ($yearLevel === null || trim($yearLevel) === '') {
+            return $yearLevel;
+        }
+
+        if (preg_match('/(\d+)/', $yearLevel, $matches) !== 1) {
+            return $yearLevel;
+        }
+
+        $nextYear = ((int) $matches[1]) + 1;
+
+        return preg_replace('/\d+(?:st|nd|rd|th)?/i', $this->ordinalYear($nextYear), $yearLevel, 1);
+    }
+
+    private function ordinalYear(int $year): string
+    {
+        return match ($year) {
+            1 => '1st',
+            2 => '2nd',
+            3 => '3rd',
+            default => "{$year}th",
+        };
+    }
+
+    private function nextAcademicYear(?string $academicYear): ?string
+    {
+        if ($academicYear === null || trim($academicYear) === '') {
+            return $academicYear;
+        }
+
+        if (preg_match('/(\d{4})\s*-\s*(\d{4})/', $academicYear, $matches) !== 1) {
+            return $academicYear;
+        }
+
+        return ((int) $matches[1] + 1).'-'.((int) $matches[2] + 1);
     }
 
     /**
@@ -796,25 +898,30 @@ class ScholarController extends Controller
      * @param  array<int, array<string, mixed>>  $grades
      * @return array<int, array<string, mixed>>
      */
-    private function buildComplianceSubmissionEntries(Scholar $scholar, array $grades, ?float $average, string $status, string $submittedAt): array
+    private function buildComplianceSubmissionEntries(Scholar $scholar, array $grades, ?float $average, string $status, string $submittedAt, array $statusOverrides = []): array
     {
-        $documents = ApplicationDocument::query()
-            ->where('scholarship_application_id', $scholar->scholarship_application_id)
-            ->whereIn('name', ['Certificate of Enrollment / COE', 'Certificate of Ratings / COR'])
-            ->get()
-            ->keyBy('name');
+        $requestedAt = $this->latestSemesterRequirementRequestedAt($scholar->submissions ?? []);
+        $documents = $requestedAt
+            ? ApplicationDocument::query()
+                ->where('scholarship_application_id', $scholar->scholarship_application_id)
+                ->whereIn('name', ['Certificate of Enrollment / COE', 'Certificate of Ratings / COR'])
+                ->where('uploaded_at', '>=', $requestedAt)
+                ->get()
+                ->keyBy('name')
+            : collect();
 
         $coe = $documents->get('Certificate of Enrollment / COE');
         $cor = $documents->get('Certificate of Ratings / COR');
 
         return [
-            $this->documentSubmissionEntry('coe', 'Certificate of Enrollment / COE', $coe, $submittedAt),
-            $this->documentSubmissionEntry('cor', 'Certificate of Ratings / COR', $cor, $submittedAt),
+            $this->documentSubmissionEntry('coe', 'Certificate of Enrollment / COE', $coe, $submittedAt, $requestedAt, $statusOverrides['coe'] ?? null),
+            $this->documentSubmissionEntry('cor', 'Certificate of Ratings / COR', $cor, $submittedAt, $requestedAt, $statusOverrides['cor'] ?? null),
             [
                 'key' => 'encoded-grades',
                 'requirement' => 'Encoded Grades',
                 'name' => 'Encoded Grades',
-                'status' => $status,
+                'status' => $statusOverrides['encoded-grades'] ?? $status,
+                'requestedAt' => $requestedAt,
                 'submittedAt' => $submittedAt,
                 'grades' => $grades,
                 'gradeRows' => $grades,
@@ -829,13 +936,14 @@ class ScholarController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function documentSubmissionEntry(string $key, string $name, ?ApplicationDocument $document, string $submittedAt): array
+    private function documentSubmissionEntry(string $key, string $name, ?ApplicationDocument $document, string $submittedAt, ?string $requestedAt, ?string $statusOverride = null): array
     {
         return array_filter([
             'key' => $key,
             'requirement' => $name,
             'name' => $name,
-            'status' => $document?->status ?? 'Missing',
+            'status' => $statusOverride ?? $document?->status ?? 'Missing',
+            'requestedAt' => $requestedAt,
             'submittedAt' => $document?->uploaded_at?->toISOString() ?? $submittedAt,
             'document' => $document ? [
                 'id' => $document->id,
@@ -850,6 +958,20 @@ class ScholarController extends Controller
                 'uploadedAt' => $document->uploaded_at?->toISOString(),
             ] : null,
         ], fn ($value): bool => $value !== null);
+    }
+
+    /**
+     * Return the latest semester-requirement request timestamp from scholar submissions.
+     *
+     * @param  array<int, array<string, mixed>>  $submissions
+     */
+    private function latestSemesterRequirementRequestedAt(array $submissions): ?string
+    {
+        return collect($submissions)
+            ->pluck('requestedAt')
+            ->filter()
+            ->sort()
+            ->last();
     }
 
     /**

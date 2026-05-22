@@ -129,6 +129,10 @@ class ScholarResource extends JsonResource
             $submissionKey = $submission['key'] ?? str($submission['requirement'] ?? $submission['name'] ?? '')->lower()->slug('-')->toString();
 
             if ($submissionKey === $key) {
+                if (in_array($key, ['coe', 'cor'], true) && isset($submission['document']) && ! isset($submission['requestedAt'])) {
+                    continue;
+                }
+
                 return $submission;
             }
         }

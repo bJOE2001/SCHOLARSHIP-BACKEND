@@ -5,16 +5,15 @@ namespace App\Http\Requests;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules\Password;
 
-class RegisterStudentRequest extends FormRequest
+class UpdateProfileRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
      */
     public function authorize(): bool
     {
-        return true;
+        return $this->user() !== null;
     }
 
     /**
@@ -25,11 +24,20 @@ class RegisterStudentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'fullName' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'email', 'string', 'max:255', Rule::unique('users', 'email')],
-            'password' => ['required', 'confirmed', $this->passwordRule()],
-            'gender' => ['nullable', 'string', 'max:50'],
+            'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'email' => [
+                'sometimes',
+                'required',
+                'email',
+                'string',
+                'max:255',
+                Rule::unique('users', 'email')->ignore($this->user()?->id),
+            ],
+            'avatar' => ['nullable', 'string', 'max:255'],
+            'department' => ['nullable', 'string', 'max:255'],
+            'studentId' => ['nullable', 'string', 'max:100'],
             'birthDate' => ['nullable', 'date'],
+            'gender' => ['nullable', 'string', 'max:50'],
             'civilStatus' => ['nullable', 'string', 'max:50'],
             'citizenship' => ['nullable', 'string', 'max:100'],
             'address' => ['nullable', 'string', 'max:255'],
@@ -37,14 +45,14 @@ class RegisterStudentRequest extends FormRequest
             'city' => ['nullable', 'string', 'max:100'],
             'province' => ['nullable', 'string', 'max:100'],
             'contactNumber' => ['nullable', 'string', 'max:30'],
+            'campus' => ['nullable', 'string', 'max:255'],
             'schoolName' => ['nullable', 'string', 'max:255'],
-            'familyIncome' => ['nullable', 'numeric', 'min:0'],
-            'studentId' => ['nullable', 'string', 'max:100'],
             'course' => ['nullable', 'string', 'max:255'],
             'yearLevel' => ['nullable', 'string', 'max:50'],
             'semester' => ['nullable', 'string', 'max:50'],
             'academicYear' => ['nullable', 'string', 'max:50'],
-            'gpa' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'gpa' => ['nullable', 'numeric', 'min:0', 'max:4'],
+            'familyIncome' => ['nullable', 'numeric', 'min:0'],
             'enrollmentStatus' => ['nullable', 'string', 'max:100'],
             'academicAwards' => ['nullable', 'string'],
             'fatherName' => ['nullable', 'string', 'max:255'],
@@ -56,20 +64,5 @@ class RegisterStudentRequest extends FormRequest
             'studyingSiblings' => ['nullable', 'integer', 'min:0'],
             'incomeBracket' => ['nullable', 'string', 'max:100'],
         ];
-    }
-
-    /**
-     * Get the password policy for student registration.
-     */
-    private function passwordRule(): Password
-    {
-        $passwordRule = Password::min(8)
-            ->mixedCase()
-            ->numbers()
-            ->symbols();
-
-        return app()->isProduction()
-            ? $passwordRule->uncompromised()
-            : $passwordRule;
     }
 }

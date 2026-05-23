@@ -12,10 +12,12 @@ class UserSeeder extends Seeder
      */
     public function run(): void
     {
-        User::factory()->create([
+        $this->seedUser([
             'name' => 'Student One',
             'email' => 'student1@example.com',
             'password' => 'password',
+            'role' => 'student',
+            'status' => 'Active',
             'student_id' => 'STU-2026-0001',
             'birth_date' => '2004-04-18',
             'gender' => 'Female',
@@ -46,28 +48,55 @@ class UserSeeder extends Seeder
             'income_bracket' => 'Below PHP 20,000',
         ]);
 
-        User::factory()->create([
+        $this->seedUser([
             'name' => 'Student Two',
             'email' => 'student2@example.com',
             'password' => 'password',
+            'role' => 'student',
+            'status' => 'Active',
         ]);
 
-        User::factory()->create([
+        $this->seedUser([
             'name' => 'Student Three',
             'email' => 'student3@example.com',
             'password' => 'password',
+            'role' => 'student',
+            'status' => 'Active',
         ]);
 
-        User::factory()->headOfficer()->create([
+        $this->seedUser([
             'name' => 'Head Scholarship Officer',
             'email' => 'head.officer@example.com',
             'password' => 'password',
+            'role' => 'head_officer',
+            'status' => 'Active',
+            'department' => 'Scholarship Programs Office',
+            'student_id' => null,
+            'school_name' => null,
         ]);
 
-        User::factory()->officer()->create([
+        $this->seedUser([
             'name' => 'TDP Scholarship Officer',
             'email' => 'tdp.officer@example.com',
             'password' => 'password',
+            'role' => 'officer',
+            'status' => 'Active',
+            'department' => 'Scholarship Programs Office',
+            'student_id' => null,
+            'school_name' => null,
         ]);
+    }
+
+    /**
+     * Create or refresh one seeded user by email.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function seedUser(array $attributes): void
+    {
+        User::query()->updateOrCreate(
+            ['email' => $attributes['email']],
+            $attributes,
+        );
     }
 }

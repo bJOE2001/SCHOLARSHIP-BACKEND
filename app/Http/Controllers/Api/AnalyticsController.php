@@ -6,11 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Scholar;
 use App\Models\ScholarshipApplication;
 use App\Models\ScholarshipProgram;
+use App\Services\ApplicantForecastService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class AnalyticsController extends Controller
 {
+    public function __construct(private readonly ApplicantForecastService $applicantForecastService) {}
+
     /**
      * Return scholarship analytics and report rows.
      */
@@ -35,8 +38,34 @@ class AnalyticsController extends Controller
                 'riskSummary' => $this->buildRiskSummary($scholars),
                 'complianceSummary' => $this->buildComplianceSummary($scholars),
                 'forecasts' => $this->buildForecasts($scholars),
+                'applicantForecast' => $this->applicantForecastService->build(
+                    $programIds,
+                    null,
+                    (string) $request->query('dateRange', 'Last 6 months'),
+                ),
             ],
             'reports' => $this->buildReports($programs, $applications),
+        ]);
+    }
+
+    /**
+     * Return applicant volume forecasts for officer planning.
+     */
+    public function applicantForecast(Request $request): JsonResponse
+    {
+        $programIds = $this->visibleProgramIds($request);
+        $programId = $request->integer('programId') ?: null;
+
+        if ($programId !== null && $programIds !== null && ! in_array($programId, $programIds, true)) {
+            abort(403);
+        }
+
+        return response()->json([
+            'applicantForecast' => $this->applicantForecastService->build(
+                $programIds,
+                $programId,
+                (string) $request->query('dateRange', 'Last 6 months'),
+            ),
         ]);
     }
 

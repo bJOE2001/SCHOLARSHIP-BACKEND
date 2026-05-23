@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterStudentRequest;
+use App\Http\Requests\UpdateProfileRequest;
 use App\Http\Resources\UserResource;
 use App\Mail\StudentRegistrationMail;
 use App\Models\User;
@@ -13,7 +14,6 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -49,18 +49,17 @@ class AuthController extends Controller
     }
 
     /**
-     * Register a student account and return an API token.
+     * Register a student account and email a welcome message.
      */
     public function register(RegisterStudentRequest $request): JsonResponse
     {
         $validated = $request->validated();
         $user = User::create($this->buildStudentAttributes($validated));
         $this->sendRegistrationEmail($user);
-        $token = $user->createToken('scholarship-web')->plainTextToken;
 
         return response()->json([
-            'token' => $token,
-            'user' => new UserResource($user),
+            'message' => 'Registration successful. You can now sign in with your password.',
+            'email' => $user->email,
         ], 201);
     }
 
@@ -107,6 +106,23 @@ class AuthController extends Controller
     }
 
     /**
+     * Update the currently authenticated user's profile.
+     */
+    public function updateProfile(UpdateProfileRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+        $user = $request->user();
+
+        $user->fill($this->mapProfileAttributes($validated));
+        $user->save();
+        $this->syncScholarProfile($user);
+
+        return response()->json([
+            'user' => new UserResource($user->refresh()),
+        ]);
+    }
+
+    /**
      * Revoke the current access token.
      */
     public function logout(Request $request): Response
@@ -127,7 +143,7 @@ class AuthController extends Controller
         return [
             'name' => $validated['fullName'],
             'email' => $validated['email'],
-            'password' => $validated['password'] ?? $this->birthdatePasswordFromValue($validated['birthDate'] ?? null) ?: Str::random(32),
+            'password' => $validated['password'],
             'role' => 'student',
             'status' => 'Active',
             'gender' => $validated['gender'] ?? null,
@@ -161,6 +177,88 @@ class AuthController extends Controller
     }
 
     /**
+     * Convert profile payload keys to user database columns.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function mapProfileAttributes(array $validated): array
+    {
+        $attributeMap = [
+            'name' => 'name',
+            'email' => 'email',
+            'avatar' => 'avatar',
+            'department' => 'department',
+            'studentId' => 'student_id',
+            'birthDate' => 'birth_date',
+            'gender' => 'gender',
+            'civilStatus' => 'civil_status',
+            'citizenship' => 'citizenship',
+            'address' => 'address',
+            'barangay' => 'barangay',
+            'city' => 'city',
+            'province' => 'province',
+            'contactNumber' => 'contact_number',
+            'campus' => 'campus',
+            'schoolName' => 'school_name',
+            'course' => 'course',
+            'yearLevel' => 'year_level',
+            'semester' => 'semester',
+            'academicYear' => 'academic_year',
+            'gpa' => 'gpa',
+            'familyIncome' => 'family_income',
+            'enrollmentStatus' => 'enrollment_status',
+            'academicAwards' => 'academic_awards',
+            'fatherName' => 'father_name',
+            'motherName' => 'mother_name',
+            'guardianName' => 'guardian_name',
+            'parentOccupation' => 'parent_occupation',
+            'monthlyIncome' => 'monthly_income',
+            'siblings' => 'siblings',
+            'studyingSiblings' => 'studying_siblings',
+            'incomeBracket' => 'income_bracket',
+        ];
+        $attributes = [];
+
+        foreach ($attributeMap as $payloadKey => $databaseColumn) {
+            if (array_key_exists($payloadKey, $validated)) {
+                $attributes[$databaseColumn] = $validated[$payloadKey];
+            }
+        }
+
+        return $attributes;
+    }
+
+    /**
+     * Keep a student's active scholar profile aligned after profile edits.
+     */
+    private function syncScholarProfile(User $user): void
+    {
+        $scholar = $user->scholarRecord;
+
+        if ($scholar === null) {
+            return;
+        }
+
+        $scholar->update([
+            'name' => $user->name,
+            'avatar' => $user->avatar,
+            'course' => $user->course,
+            'year_level' => $user->year_level,
+            'school' => $user->school_name ?: $user->campus,
+            'gender' => $user->gender,
+            'birthdate' => $user->birth_date,
+            'address' => $user->address,
+            'contact_number' => $user->contact_number,
+            'email' => $user->email,
+            'gpa' => $user->gpa,
+            'enrollment_status' => $user->enrollment_status,
+            'academic_year' => $user->academic_year,
+            'semester' => $user->semester,
+        ]);
+    }
+
+    /**
      * Convert a user's saved birthdate to MMDDYY.
      */
     private function birthdatePassword(User $user): string
@@ -170,26 +268,6 @@ class AuthController extends Controller
         }
 
         return $user->birth_date->format('mdy');
-    }
-
-    /**
-     * Convert a registration birthdate value to MMDDYY.
-     */
-    private function birthdatePasswordFromValue(?string $birthDate): string
-    {
-        if ($birthDate === null || $birthDate === '') {
-            return '';
-        }
-
-        $parts = explode('-', $birthDate);
-
-        if (count($parts) !== 3) {
-            return '';
-        }
-
-        [$year, $month, $day] = $parts;
-
-        return str_pad($month, 2, '0', STR_PAD_LEFT).str_pad($day, 2, '0', STR_PAD_LEFT).substr($year, -2);
     }
 
     /**
@@ -215,7 +293,7 @@ class AuthController extends Controller
     }
 
     /**
-     * Send a welcome email after a student registers.
+     * Send a welcome message after a student registers.
      */
     private function sendRegistrationEmail(User $user): void
     {

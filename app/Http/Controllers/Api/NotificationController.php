@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreNotificationRequest;
 use App\Http\Resources\ScholarshipNotificationResource;
 use App\Models\ScholarshipNotification;
+use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -82,26 +84,71 @@ class NotificationController extends Controller
     /**
      * Get the notifications visible to the current user.
      */
-    private function visibleNotificationsQuery(Request $request)
+    private function visibleNotificationsQuery(Request $request): Builder
     {
         $currentUser = $request->user();
 
+        abort_unless($currentUser instanceof User, 401);
+
         return ScholarshipNotification::query()
-            ->when($currentUser !== null, function ($query) use ($currentUser): void {
-                $query->where(function ($nestedQuery) use ($currentUser): void {
-                    $nestedQuery
-                        ->where('user_id', $currentUser->id)
-                        ->orWhere(function ($roleQuery) use ($currentUser): void {
-                            $roleQuery
-                                ->whereNull('user_id')
-                                ->where(function ($roleMatchQuery) use ($currentUser): void {
-                                    $roleMatchQuery
-                                        ->where('role', $currentUser->role)
-                                        ->orWhereNull('role');
-                                });
-                        });
-                });
+            ->where(function (Builder $targetQuery) use ($currentUser): void {
+                $targetQuery
+                    ->where('user_id', $currentUser->id)
+                    ->orWhere(function (Builder $roleQuery) use ($currentUser): void {
+                        $roleQuery
+                            ->whereNull('user_id')
+                            ->where(function (Builder $roleMatchQuery) use ($currentUser): void {
+                                $roleMatchQuery
+                                    ->where('role', $currentUser->role)
+                                    ->orWhereNull('role');
+                            })
+                            ->where(function (Builder $dateQuery) use ($currentUser): void {
+                                $dateQuery
+                                    ->where('notified_at', '>=', $currentUser->created_at)
+                                    ->orWhere(function (Builder $fallbackDateQuery) use ($currentUser): void {
+                                        $fallbackDateQuery
+                                            ->whereNull('notified_at')
+                                            ->where('created_at', '>=', $currentUser->created_at);
+                                    });
+                            });
+                    });
             });
+    }
+
+    /**
+     * Determine whether a notification is visible to a specific user.
+     */
+    private function notificationVisibleToUser(ScholarshipNotification $notification, User $currentUser): bool
+    {
+        if ($notification->user_id === $currentUser->id) {
+            return true;
+        }
+
+        if (
+            $notification->user_id !== null
+            || (
+                $notification->role !== $currentUser->role
+                && $notification->role !== null
+            )
+        ) {
+            return false;
+        }
+
+        return $this->notificationDeliveredAfterUserCreation($notification, $currentUser);
+    }
+
+    /**
+     * Determine whether a role-wide notification was delivered after the user joined.
+     */
+    private function notificationDeliveredAfterUserCreation(ScholarshipNotification $notification, User $currentUser): bool
+    {
+        if ($currentUser->created_at === null) {
+            return true;
+        }
+
+        $notifiedAt = $notification->notified_at ?? $notification->created_at;
+
+        return $notifiedAt !== null && $notifiedAt->greaterThanOrEqualTo($currentUser->created_at);
     }
 
     /**
@@ -112,17 +159,7 @@ class NotificationController extends Controller
         $currentUser = $request->user();
 
         abort_unless(
-            $currentUser !== null
-                && (
-                    $notification->user_id === $currentUser->id
-                    || (
-                        $notification->user_id === null
-                        && (
-                            $notification->role === $currentUser->role
-                            || $notification->role === null
-                        )
-                    )
-                ),
+            $currentUser instanceof User && $this->notificationVisibleToUser($notification, $currentUser),
             403,
         );
     }

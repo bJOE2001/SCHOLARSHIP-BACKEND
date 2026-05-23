@@ -143,6 +143,26 @@ class User extends Authenticatable
     }
 
     /**
+     * Get the saved workspace settings for this user.
+     *
+     * @return HasOne<UserSetting, $this>
+     */
+    public function settings(): HasOne
+    {
+        return $this->hasOne(UserSetting::class);
+    }
+
+    /**
+     * Get the student's current semester requirement draft.
+     *
+     * @return HasOne<SemesterRequirementDraft, $this>
+     */
+    public function semesterRequirementDraft(): HasOne
+    {
+        return $this->hasOne(SemesterRequirementDraft::class);
+    }
+
+    /**
      * Get the notifications for the user.
      *
      * @return HasMany<ScholarshipNotification, $this>
@@ -150,6 +170,16 @@ class User extends Authenticatable
     public function notifications(): HasMany
     {
         return $this->hasMany(ScholarshipNotification::class);
+    }
+
+    /**
+     * Get announcements created by this user.
+     *
+     * @return HasMany<Announcement, $this>
+     */
+    public function announcements(): HasMany
+    {
+        return $this->hasMany(Announcement::class, 'created_by_id');
     }
 
     /**

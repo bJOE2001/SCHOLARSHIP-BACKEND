@@ -81,10 +81,7 @@ return [
 
         'failover' => [
             'transport' => 'failover',
-            'mailers' => [
-                'smtp',
-                'log',
-            ],
+            'mailers' => array_values(array_filter(array_map('trim', explode(',', env('MAIL_FAILOVER_MAILERS', 'resend'))))),
             'retry_after' => 60,
         ],
 

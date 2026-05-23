@@ -25,7 +25,9 @@ class ScholarshipProgramSeeder extends Seeder
         ];
 
         foreach ($programs as $index => $program) {
-            $scholarshipProgram = ScholarshipProgram::create([
+            $scholarshipProgram = ScholarshipProgram::query()->updateOrCreate([
+                'provider' => $program['code'],
+            ], [
                 'name' => $program['name'],
                 'provider' => $program['code'],
                 'category' => $program['category'],
@@ -62,12 +64,12 @@ class ScholarshipProgramSeeder extends Seeder
                 'published_at' => $index < 4 ? now()->subWeeks(2) : null,
             ]);
 
-            $scholarshipProgram->assignedOfficers()->sync(
+            $scholarshipProgram->assignedOfficers()->syncWithoutDetaching(
                 $program['code'] === 'TDP' ? [$tdpOfficer->id] : [$headOfficer->id],
             );
         }
 
-        $tdpOfficer->assignedPrograms()->sync(
+        $tdpOfficer->assignedPrograms()->syncWithoutDetaching(
             ScholarshipProgram::query()
                 ->where('provider', 'TDP')
                 ->pluck('id')

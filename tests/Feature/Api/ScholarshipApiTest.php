@@ -47,13 +47,15 @@ class ScholarshipApiTest extends TestCase
         $response->assertJsonPath('user.role', 'student');
     }
 
-    public function test_student_can_register_with_profile_details_and_login_with_birthdate_password(): void
+    public function test_student_can_register_with_profile_details_and_login_with_chosen_password(): void
     {
         Mail::fake();
 
         $response = $this->postJson('/api/auth/register', [
             'fullName' => 'Register Student',
             'email' => 'register.student@example.com',
+            'password' => 'StrongPass123!',
+            'password_confirmation' => 'StrongPass123!',
             'birthDate' => '2004-05-12',
             'gender' => 'Female',
             'schoolName' => 'ScholarSync State University',
@@ -67,19 +69,36 @@ class ScholarshipApiTest extends TestCase
         ]);
 
         $response->assertCreated();
-        $response->assertJsonPath('user.role', 'student');
-        $response->assertJsonPath('user.email', 'register.student@example.com');
-        Mail::assertQueued(StudentRegistrationMail::class, function (StudentRegistrationMail $mail): bool {
-            return $mail->hasTo('register.student@example.com');
-        });
+        $response->assertJsonPath('email', 'register.student@example.com');
+        $this->assertArrayNotHasKey('token', $response->json());
+        Mail::assertQueued(
+            StudentRegistrationMail::class,
+            fn (StudentRegistrationMail $mail): bool => $mail->hasTo('register.student@example.com')
+        );
 
         $loginResponse = $this->postJson('/api/auth/login', [
             'email' => 'register.student@example.com',
-            'password' => '051204',
+            'password' => 'StrongPass123!',
         ]);
 
         $loginResponse->assertOk();
         $loginResponse->assertJsonPath('user.email', 'register.student@example.com');
+    }
+
+    public function test_student_registration_rejects_weak_password(): void
+    {
+        Mail::fake();
+
+        $response = $this->postJson('/api/auth/register', [
+            'fullName' => 'Weak Password Student',
+            'email' => 'weak.password.student@example.com',
+            'password' => 'password',
+            'password_confirmation' => 'password',
+        ]);
+
+        $response->assertUnprocessable();
+        $response->assertJsonValidationErrors(['password']);
+        Mail::assertNothingQueued();
     }
 
     public function test_authenticated_user_can_logout_without_server_error(): void
@@ -124,6 +143,55 @@ class ScholarshipApiTest extends TestCase
 
         $response->assertNoContent();
         $this->assertNotNull($notification->fresh()->read_at);
+    }
+
+    public function test_new_student_does_not_receive_role_notifications_created_before_account(): void
+    {
+        $oldNotifiedAt = now()->subDay();
+        $accountCreatedAt = now();
+        $newNotifiedAt = now()->addMinute();
+
+        $oldNotification = ScholarshipNotification::factory()->create([
+            'user_id' => null,
+            'role' => 'student',
+            'title' => 'Old student notice',
+            'message' => 'This was sent before the student account existed.',
+            'notified_at' => $oldNotifiedAt,
+            'read_at' => null,
+            'created_at' => $oldNotifiedAt,
+            'updated_at' => $oldNotifiedAt,
+        ]);
+
+        ScholarshipNotification::factory()->create([
+            'user_id' => null,
+            'role' => 'student',
+            'title' => 'New student notice',
+            'message' => 'This was sent after the student account existed.',
+            'notified_at' => $newNotifiedAt,
+            'read_at' => null,
+            'created_at' => $newNotifiedAt,
+            'updated_at' => $newNotifiedAt,
+        ]);
+
+        $student = User::factory()->create([
+            'name' => 'New Notification Student',
+            'email' => 'new.notification.student@example.com',
+            'password' => 'password',
+            'role' => 'student',
+            'created_at' => $accountCreatedAt,
+            'updated_at' => $accountCreatedAt,
+        ]);
+
+        Sanctum::actingAs($student);
+
+        $response = $this->getJson('/api/notifications');
+
+        $response->assertOk();
+        $response->assertJsonCount(1, 'notifications');
+        $response->assertJsonMissing(['title' => 'Old student notice']);
+        $response->assertJsonFragment(['title' => 'New student notice']);
+
+        $this->patchJson("/api/notifications/{$oldNotification->id}/read")->assertForbidden();
     }
 
     public function test_public_program_listing_returns_open_programs(): void

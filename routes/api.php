@@ -57,6 +57,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/scholars/{scholar}', [ScholarController::class, 'show']);
     Route::post('/scholars/{scholar}/semester-requirements', [ScholarController::class, 'submitSemesterRequirements']);
     Route::get('/grant-distribution', [GrantDistributionController::class, 'index']);
+    Route::get('/documents/{document}/file', [DocumentController::class, 'showFile'])->name('documents.file');
 
     Route::middleware('role:head_officer,officer')->group(function (): void {
         Route::post('/notifications', [NotificationController::class, 'store']);
@@ -73,7 +74,6 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
         Route::get('/applications/review', [ApplicationController::class, 'review']);
         Route::patch('/applications/{application}/status', [ApplicationController::class, 'updateStatus']);
-        Route::get('/documents/{document}/file', [DocumentController::class, 'showFile'])->name('documents.file');
         Route::patch('/documents/{document}/status', [DocumentController::class, 'updateStatus']);
 
         Route::get('/analytics', [AnalyticsController::class, 'summary']);

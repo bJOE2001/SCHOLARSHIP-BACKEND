@@ -32,10 +32,10 @@ class SemesterRequirementDraftFactory extends Factory
                     'name' => 'College Algebra',
                     'subjectName' => 'College Algebra',
                     'units' => 3,
-                    'grade' => 1.75,
+                    'grade' => 90,
                 ],
             ],
-            'computed_average' => 1.75,
+            'computed_average' => 90,
             'submitted_at' => null,
         ];
     }

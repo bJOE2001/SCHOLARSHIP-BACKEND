@@ -21,7 +21,7 @@ return new class extends Migration
             $table->string('coe_status')->default('Submitted');
             $table->string('cor_status')->default('Submitted');
             $table->string('grades_status')->default('Submitted');
-            $table->decimal('gpa', 4, 2)->nullable();
+            $table->decimal('gpa', 5, 2)->nullable();
             $table->json('submissions')->nullable();
             $table->json('grades')->nullable();
             $table->text('officer_notes')->nullable();

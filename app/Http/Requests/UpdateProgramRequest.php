@@ -34,6 +34,7 @@ class UpdateProgramRequest extends FormRequest
             'slots' => ['nullable', 'integer', 'min:0'],
             'usedSlots' => ['nullable', 'integer', 'min:0'],
             'budget' => ['nullable', 'integer', 'min:0'],
+            'maintainingGrade' => ['nullable', 'numeric', 'min:1', 'max:100'],
             'schedule' => ['nullable', 'array'],
             'schedule.opening' => ['nullable', 'string', 'max:100'],
             'schedule.deadline' => ['nullable', 'string', 'max:100'],

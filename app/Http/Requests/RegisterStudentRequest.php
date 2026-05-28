@@ -44,7 +44,7 @@ class RegisterStudentRequest extends FormRequest
             'yearLevel' => ['nullable', 'string', 'max:50'],
             'semester' => ['nullable', 'string', 'max:50'],
             'academicYear' => ['nullable', 'string', 'max:50'],
-            'gpa' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'gpa' => ['nullable', 'numeric', 'min:1', 'max:100'],
             'enrollmentStatus' => ['nullable', 'string', 'max:100'],
             'academicAwards' => ['nullable', 'string'],
             'fatherName' => ['nullable', 'string', 'max:255'],

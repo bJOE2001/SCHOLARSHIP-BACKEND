@@ -25,7 +25,7 @@ class UserFactory extends Factory
     public function definition(): array
     {
         $studentId = fake()->unique()->numerify('STU-2026-####');
-        $gpa = fake()->randomFloat(2, 1.5, 4.0);
+        $gpa = fake()->randomFloat(2, 75, 100);
 
         return [
             'name' => fake()->name(),

@@ -17,6 +17,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -141,38 +142,38 @@ class ApplicationController extends Controller
     {
         $validated = $request->validated();
         $currentUser = $request->user();
+        $removedApplicationIds = [];
 
         abort_unless($this->canAccessApplication($currentUser, $application), 403);
 
-        $application->fill([
-            'status' => $validated['status'],
-            'remarks' => $validated['remarks'] ?? $application->remarks,
-            'next_action' => $this->nextActionForStatus($validated['status']),
-            'progress' => $this->progressForStatus($validated['status']),
-            'score' => $this->scoreForStatus($validated['status'], (int) $application->score),
-            'risk_label' => $this->riskLabelForStatus($validated['status']),
-            'reviewed_by_id' => $currentUser?->id,
-            'reviewed_at' => now(),
-        ]);
+        DB::transaction(function () use ($application, $currentUser, $validated, &$removedApplicationIds): void {
+            $application->fill([
+                'status' => $validated['status'],
+                'remarks' => $validated['remarks'] ?? $application->remarks,
+                'next_action' => $this->nextActionForStatus($validated['status']),
+                'progress' => $this->progressForStatus($validated['status']),
+                'score' => $this->scoreForStatus($validated['status'], (int) $application->score),
+                'risk_label' => $this->riskLabelForStatus($validated['status']),
+                'reviewed_by_id' => $currentUser?->id,
+                'reviewed_at' => now(),
+            ]);
 
-        $statusChanged = $application->isDirty('status');
-        $remarksChanged = array_key_exists('remarks', $validated) && $application->isDirty('remarks');
+            $application->appendTimelineEvent($validated['status'], $validated['remarks'] ?? $application->remarks ?? 'Status updated.');
+            $application->save();
 
-        $application->appendTimelineEvent($validated['status'], $validated['remarks'] ?? $application->remarks ?? 'Status updated.');
-        $application->save();
+            $this->syncProgramUsage($application->program);
 
-        $this->syncProgramUsage($application->program);
+            if (in_array($application->status, $this->activeStatuses(), true)) {
+                $this->syncScholarRecord($application);
+                $removedApplicationIds = $this->removeOtherPendingApplications($application);
+            }
+        });
 
-        if (in_array($application->status, $this->activeStatuses(), true)) {
-            $this->syncScholarRecord($application);
-        }
-
-        if ($statusChanged || $remarksChanged) {
-            $this->notifyApplicantOfStatus($application, $validated['remarks'] ?? null);
-        }
+        $this->notifyApplicantOfStatus($application, $validated['remarks'] ?? null);
 
         return response()->json([
             'application' => new ScholarshipApplicationResource($application->load(['documents', 'applicant', 'program'])),
+            'removedApplicationIds' => $removedApplicationIds,
         ]);
     }
 
@@ -506,6 +507,54 @@ class ApplicationController extends Controller
         $scholar->update([
             'submissions' => $submissions,
         ]);
+    }
+
+    /**
+     * Remove a newly approved scholar's other still-pending applications.
+     *
+     * @return array<int, int>
+     */
+    private function removeOtherPendingApplications(ScholarshipApplication $approvedApplication): array
+    {
+        $removableStatuses = [
+            'Draft',
+            'Submitted',
+            'For Revision',
+            'Needs Revision',
+            'Resubmitted',
+            'Under Review',
+            'Eligible',
+            'Shortlisted',
+        ];
+
+        $applications = ScholarshipApplication::query()
+            ->where('applicant_id', $approvedApplication->applicant_id)
+            ->where('id', '!=', $approvedApplication->id)
+            ->where('scholarship_program_id', '!=', $approvedApplication->scholarship_program_id)
+            ->whereIn('status', $removableStatuses)
+            ->get(['id', 'scholarship_program_id']);
+
+        if ($applications->isEmpty()) {
+            return [];
+        }
+
+        $programIds = $applications
+            ->pluck('scholarship_program_id')
+            ->push($approvedApplication->scholarship_program_id)
+            ->unique()
+            ->values();
+        $applicationIds = $applications->pluck('id')->map(fn (int $id): int => $id)->all();
+
+        ScholarshipApplication::query()
+            ->whereIn('id', $applicationIds)
+            ->delete();
+
+        ScholarshipProgram::query()
+            ->whereIn('id', $programIds)
+            ->get()
+            ->each(fn (ScholarshipProgram $program) => $this->syncProgramUsage($program));
+
+        return $applicationIds;
     }
 
     /**

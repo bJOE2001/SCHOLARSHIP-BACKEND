@@ -37,7 +37,7 @@ return new class extends Migration
             $table->string('year_level')->nullable();
             $table->string('semester')->nullable();
             $table->string('academic_year')->nullable();
-            $table->decimal('gpa', 4, 2)->nullable();
+            $table->decimal('gpa', 5, 2)->nullable();
             $table->decimal('family_income', 12, 2)->nullable();
             $table->string('enrollment_status')->nullable();
             $table->text('academic_awards')->nullable();

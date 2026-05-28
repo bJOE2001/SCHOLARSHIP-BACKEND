@@ -43,7 +43,7 @@ class ScholarFactory extends Factory
             'address' => fake()->address(),
             'contact_number' => fake()->numerify('09#########'),
             'email' => fake()->safeEmail(),
-            'gpa' => fake()->randomFloat(2, 1.75, 4.0),
+            'gpa' => fake()->randomFloat(2, 75, 100),
             'enrollment_status' => 'Enrolled and Verified',
             'academic_year' => '2025-2026',
             'semester' => fake()->randomElement(['1st Semester', '2nd Semester']),

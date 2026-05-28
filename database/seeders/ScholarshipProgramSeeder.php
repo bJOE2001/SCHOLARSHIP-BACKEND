@@ -15,13 +15,14 @@ class ScholarshipProgramSeeder extends Seeder
     {
         $headOfficer = User::query()->where('email', 'head.officer@example.com')->firstOrFail();
         $tdpOfficer = User::query()->where('email', 'tdp.officer@example.com')->firstOrFail();
+        $meritOfficer = User::query()->where('email', 'merit.officer@example.com')->firstOrFail();
         $programs = [
             ['code' => 'TDP', 'name' => 'Tulong Dunong Program', 'category' => 'Government Assistance', 'type' => 'Grant', 'slots' => 100, 'budget' => 3000000],
-            ['code' => 'TES', 'name' => 'Tertiary Education Subsidy', 'category' => 'Government Subsidy', 'type' => 'Subsidy', 'slots' => 120, 'budget' => 6000000],
-            ['code' => 'DOST', 'name' => 'DOST Scholarship', 'category' => 'Science and Technology', 'type' => 'Scholarship', 'slots' => 40, 'budget' => 4000000],
-            ['code' => 'EAP', 'name' => 'Educational Assistance Program', 'category' => 'Educational Assistance', 'type' => 'Assistance', 'slots' => 80, 'budget' => 2000000],
-            ['code' => 'SKEA', 'name' => 'SK Educational Assistance', 'category' => 'Local Youth Assistance', 'type' => 'Assistance', 'slots' => 60, 'budget' => 900000],
-            ['code' => 'LGU-SCH', 'name' => 'LGU Scholarship', 'category' => 'Local Government Scholarship', 'type' => 'Scholarship', 'slots' => 50, 'budget' => 1500000],
+            ['code' => 'MERIT', 'name' => 'Merit Scholars Grant', 'category' => 'Academic Merit', 'type' => 'Scholarship', 'slots' => 45, 'budget' => 1800000],
+        ];
+        $programOfficers = [
+            'TDP' => $tdpOfficer,
+            'MERIT' => $meritOfficer,
         ];
 
         foreach ($programs as $index => $program) {
@@ -64,14 +65,20 @@ class ScholarshipProgramSeeder extends Seeder
                 'published_at' => $index < 4 ? now()->subWeeks(2) : null,
             ]);
 
-            $scholarshipProgram->assignedOfficers()->syncWithoutDetaching(
-                $program['code'] === 'TDP' ? [$tdpOfficer->id] : [$headOfficer->id],
-            );
+            $scholarshipProgram->assignedOfficers()->sync([$programOfficers[$program['code']]->id]);
         }
 
-        $tdpOfficer->assignedPrograms()->syncWithoutDetaching(
+        $headOfficer->assignedPrograms()->sync([]);
+        $tdpOfficer->assignedPrograms()->sync(
             ScholarshipProgram::query()
                 ->where('provider', 'TDP')
+                ->pluck('id')
+                ->map(static fn (mixed $id): int => (int) $id)
+                ->all(),
+        );
+        $meritOfficer->assignedPrograms()->sync(
+            ScholarshipProgram::query()
+                ->where('provider', 'MERIT')
                 ->pluck('id')
                 ->map(static fn (mixed $id): int => (int) $id)
                 ->all(),

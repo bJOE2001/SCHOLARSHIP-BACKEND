@@ -35,8 +35,8 @@ class UpdateSemesterRequirementDraftRequest extends FormRequest
             'grades.*.name' => ['nullable', 'string', 'max:255'],
             'grades.*.subjectName' => ['nullable', 'string', 'max:255'],
             'grades.*.units' => ['nullable', 'numeric', 'min:0'],
-            'grades.*.grade' => ['nullable', 'numeric', 'min:0'],
-            'computedAverage' => ['nullable', 'numeric', 'min:0'],
+            'grades.*.grade' => ['nullable', 'numeric', 'min:1', 'max:100'],
+            'computedAverage' => ['nullable', 'numeric', 'min:1', 'max:100'],
             'submittedAt' => ['nullable', 'date'],
         ];
     }

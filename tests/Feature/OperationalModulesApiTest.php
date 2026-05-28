@@ -93,13 +93,14 @@ class OperationalModulesApiTest extends TestCase
     {
         $program = ScholarshipProgram::factory()->published()->create([
             'name' => 'Merit Program',
+            'maintaining_grade' => 75,
         ]);
         $officer = User::factory()->officer()->create([
             'assigned_program_ids' => [$program->id],
         ]);
         $student = User::factory()->create([
             'name' => 'Ranked Student',
-            'gpa' => 1.75,
+            'gpa' => 92,
         ]);
         ScholarshipApplication::factory()->submitted()->create([
             'scholarship_program_id' => $program->id,
@@ -113,7 +114,7 @@ class OperationalModulesApiTest extends TestCase
             'scholarship_program_id' => $program->id,
             'name' => 'Ranked Student',
             'program' => 'Merit Program',
-            'gpa' => 2.75,
+            'gpa' => 72,
             'risk_label' => 'High Risk',
             'compliance_status' => 'Non-Compliant',
             'compliance_rate' => 25,
@@ -130,13 +131,69 @@ class OperationalModulesApiTest extends TestCase
         $this->getJson('/api/risk-detection')
             ->assertOk()
             ->assertJsonPath('riskRows.0.name', 'Ranked Student')
-            ->assertJsonPath('riskRows.0.riskLabel', 'Critical')
-            ->assertJsonPath('riskSummary.3.label', 'Critical');
+            ->assertJsonPath('riskRows.0.riskLabel', 'At Risk')
+            ->assertJsonPath('riskSummary.2.label', 'At Risk')
+            ->assertJsonPath('riskSummary.2.count', 1);
 
         $response = $this->get('/api/reports/export?type=CSV');
 
         $response->assertOk();
         $this->assertStringContainsString('Merit Program Monitoring Report', $response->streamedContent());
+    }
+
+    public function test_approving_one_application_removes_students_other_pending_applications(): void
+    {
+        $approvedProgram = ScholarshipProgram::factory()->published()->create([
+            'name' => 'Approved Program',
+        ]);
+        $otherProgram = ScholarshipProgram::factory()->published()->create([
+            'name' => 'Other Program',
+        ]);
+        $student = User::factory()->create([
+            'name' => 'Multi Applicant',
+        ]);
+        $officer = User::factory()->officer()->create([
+            'assigned_program_ids' => [$approvedProgram->id, $otherProgram->id],
+        ]);
+        $application = ScholarshipApplication::factory()->underReview()->create([
+            'scholarship_program_id' => $approvedProgram->id,
+            'applicant_id' => $student->id,
+        ]);
+        $otherSubmittedApplication = ScholarshipApplication::factory()->submitted()->create([
+            'scholarship_program_id' => $otherProgram->id,
+            'applicant_id' => $student->id,
+        ]);
+        $otherRejectedApplication = ScholarshipApplication::factory()->rejected()->create([
+            'scholarship_program_id' => $otherProgram->id,
+            'applicant_id' => $student->id,
+        ]);
+
+        Sanctum::actingAs($officer);
+
+        $this->patchJson("/api/applications/{$application->id}/status", [
+            'status' => 'Approved',
+            'remarks' => 'Approved for scholarship.',
+        ])
+            ->assertOk()
+            ->assertJsonPath('application.status', 'Approved')
+            ->assertJsonPath('removedApplicationIds.0', $otherSubmittedApplication->id);
+
+        $this->assertDatabaseHas(ScholarshipApplication::class, [
+            'id' => $application->id,
+            'status' => 'Approved',
+        ]);
+        $this->assertDatabaseMissing(ScholarshipApplication::class, [
+            'id' => $otherSubmittedApplication->id,
+        ]);
+        $this->assertDatabaseHas(ScholarshipApplication::class, [
+            'id' => $otherRejectedApplication->id,
+            'status' => 'Rejected',
+        ]);
+        $this->assertDatabaseHas(Scholar::class, [
+            'scholarship_application_id' => $application->id,
+            'user_id' => $student->id,
+            'scholarship_status' => 'Active Scholar',
+        ]);
     }
 
     public function test_officer_can_view_applicant_forecast_from_application_history(): void
@@ -232,13 +289,13 @@ class OperationalModulesApiTest extends TestCase
                     'code' => 'IT 101',
                     'name' => 'Programming 1',
                     'units' => 3,
-                    'grade' => 1.5,
+                    'grade' => 90,
                 ],
             ],
         ])
             ->assertCreated()
             ->assertJsonPath('draft.status', 'Draft')
-            ->assertJsonPath('draft.computedAverage', 1.5);
+            ->assertJsonPath('draft.computedAverage', 90);
 
         $this->getJson('/api/semester-requirement-draft')
             ->assertOk()

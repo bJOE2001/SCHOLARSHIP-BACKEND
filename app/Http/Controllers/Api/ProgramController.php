@@ -167,6 +167,7 @@ class ProgramController extends Controller
             'slots' => 'slots',
             'usedSlots' => 'used_slots',
             'budget' => 'budget',
+            'maintainingGrade' => 'maintaining_grade',
             'schedule' => 'schedule',
             'eligibility' => 'eligibility',
             'requirements' => 'requirements',

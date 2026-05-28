@@ -27,6 +27,7 @@ class ScholarshipProgramResource extends JsonResource
             'usedSlots' => $this->used_slots,
             'availableSlots' => $this->availableSlots(),
             'budget' => $this->budget,
+            'maintainingGrade' => $this->maintaining_grade,
             'schedule' => $this->schedule ?? [],
             'eligibility' => $this->eligibility ?? [],
             'requirements' => $this->requirementNames(),

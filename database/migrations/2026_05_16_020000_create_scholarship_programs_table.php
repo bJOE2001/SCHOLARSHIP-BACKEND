@@ -23,6 +23,7 @@ return new class extends Migration
             $table->unsignedInteger('slots')->default(0);
             $table->unsignedInteger('used_slots')->default(0);
             $table->unsignedBigInteger('budget')->nullable();
+            $table->decimal('maintaining_grade', 5, 2)->nullable();
             $table->json('schedule')->nullable();
             $table->json('eligibility')->nullable();
             $table->json('requirements')->nullable();

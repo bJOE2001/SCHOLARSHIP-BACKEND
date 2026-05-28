@@ -28,7 +28,7 @@ return new class extends Migration
             $table->text('address')->nullable();
             $table->string('contact_number')->nullable();
             $table->string('email');
-            $table->decimal('gpa', 4, 2)->nullable();
+            $table->decimal('gpa', 5, 2)->nullable();
             $table->string('enrollment_status')->nullable();
             $table->string('academic_year')->nullable();
             $table->string('semester')->nullable();

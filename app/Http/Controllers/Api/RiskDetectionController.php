@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Scholar;
+use App\Models\ScholarshipProgram;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,15 +19,27 @@ class RiskDetectionController extends Controller
         abort_unless($request->user()?->isOfficer(), 403);
 
         $programIds = $this->visibleProgramIds($request);
+        $maintainingGrades = ScholarshipProgram::query()
+            ->whereNotNull('maintaining_grade')
+            ->when($programIds !== null, fn (Builder $query) => $query->whereIn('id', $programIds))
+            ->pluck('maintaining_grade', 'id')
+            ->map(fn (mixed $grade): float => (float) $grade);
+
+        abort_if($maintainingGrades->isEmpty(), 403);
+
         $scholars = Scholar::query()
             ->when($programIds !== null, fn (Builder $query) => $query->whereIn('scholarship_program_id', $programIds))
+            ->whereIn('scholarship_program_id', $maintainingGrades->keys())
             ->orderBy('name')
             ->get();
         $riskRows = $scholars
-            ->map(fn (Scholar $scholar): array => $this->riskRow($scholar))
+            ->map(fn (Scholar $scholar): array => $this->riskRow(
+                $scholar,
+                (float) $maintainingGrades->get($scholar->scholarship_program_id),
+            ))
             ->values()
             ->all();
-        $riskSummary = collect(['Stable', 'Borderline', 'At Risk', 'Critical'])
+        $riskSummary = collect(['Stable', 'Borderline', 'At Risk'])
             ->map(fn (string $label): array => [
                 'label' => $label,
                 'count' => collect($riskRows)->where('riskLabel', $label)->count(),
@@ -52,9 +65,9 @@ class RiskDetectionController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function riskRow(Scholar $scholar): array
+    private function riskRow(Scholar $scholar, float $maintainingGrade): array
     {
-        $riskLabel = $this->displayRiskLabel($scholar);
+        $riskLabel = $this->displayRiskLabel($scholar, $maintainingGrade);
 
         return [
             'id' => $scholar->id,
@@ -64,9 +77,9 @@ class RiskDetectionController extends Controller
             'name' => $scholar->name,
             'program' => $scholar->program,
             'gpa' => $scholar->gpa,
-            'complianceStatus' => $this->displayComplianceStatus($scholar->compliance_status),
+            'maintainingGrade' => $maintainingGrade,
             'riskLabel' => $riskLabel,
-            'riskReason' => $scholar->risk_reason ?: $this->riskReasonFor($scholar, $riskLabel),
+            'riskReason' => $this->riskReasonFor($scholar, $riskLabel, $maintainingGrade),
             'recommendedAction' => $scholar->recommended_action ?: $this->recommendedActionFor($riskLabel),
             'updatedAt' => $scholar->updated_at?->toISOString(),
         ];
@@ -92,51 +105,35 @@ class RiskDetectionController extends Controller
         return [];
     }
 
-    private function displayRiskLabel(Scholar $scholar): string
+    private function displayRiskLabel(Scholar $scholar, float $maintainingGrade): string
     {
-        $riskLabel = $scholar->risk_label ?: 'Stable';
+        $gpa = (float) $scholar->gpa;
 
-        if (in_array($riskLabel, ['Stable', 'Borderline', 'At Risk', 'Critical'], true)) {
-            return $riskLabel;
+        if ($gpa <= 0 || $gpa < $maintainingGrade) {
+            return 'At Risk';
+        }
+
+        return $gpa < ($maintainingGrade + 5) ? 'Borderline' : 'Stable';
+    }
+
+    private function riskReasonFor(Scholar $scholar, string $riskLabel, float $maintainingGrade): string
+    {
+        if ((float) $scholar->gpa <= 0) {
+            return "No GPA recorded. Maintaining grade is {$maintainingGrade}.";
         }
 
         return match ($riskLabel) {
-            'High Risk' => ($scholar->compliance_status === 'Non-Compliant' || (int) $scholar->compliance_rate < 40) ? 'Critical' : 'At Risk',
-            'Medium Risk' => 'Borderline',
-            default => 'Stable',
-        };
-    }
-
-    private function displayComplianceStatus(?string $status): string
-    {
-        return match ($status) {
-            'Compliant' => 'Complete',
-            'Under Review' => 'Pending Review',
-            'Incomplete' => 'Missing Requirements',
-            default => $status ?: 'Pending Review',
-        };
-    }
-
-    private function riskReasonFor(Scholar $scholar, string $riskLabel): string
-    {
-        if ((float) $scholar->gpa > 2.5) {
-            return 'Low GPA and renewal eligibility risk';
-        }
-
-        return match ($riskLabel) {
-            'Critical' => 'Non-compliant semester submissions',
-            'At Risk' => 'Missing requirements detected',
-            'Borderline' => 'GPA is close to renewal threshold',
-            default => 'Complete requirements and strong GPA trend',
+            'At Risk' => "GPA is below the maintaining grade of {$maintainingGrade}.",
+            'Borderline' => "GPA is close to the maintaining grade of {$maintainingGrade}.",
+            default => "GPA meets the maintaining grade of {$maintainingGrade}.",
         };
     }
 
     private function recommendedActionFor(string $riskLabel): string
     {
         return match ($riskLabel) {
-            'Critical' => 'Escalate for intervention review',
-            'At Risk' => 'Request requirements and schedule advising',
-            'Borderline' => 'Send reminder and monitor next submission',
+            'At Risk' => 'Schedule advising and monitor the next GPA submission',
+            'Borderline' => 'Send reminder and monitor next GPA submission',
             default => 'Continue normal monitoring',
         };
     }

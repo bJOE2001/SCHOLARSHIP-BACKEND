@@ -89,6 +89,43 @@ class OperationalModulesApiTest extends TestCase
         ]);
     }
 
+    public function test_officer_can_delete_owned_announcement(): void
+    {
+        $officer = User::factory()->headOfficer()->create();
+        $program = ScholarshipProgram::factory()->published()->create([
+            'name' => 'Deleted Notice Program',
+        ]);
+        $announcement = Announcement::factory()->create([
+            'scholarship_program_id' => $program->id,
+            'created_by_id' => $officer->id,
+            'title' => 'Delete Me',
+            'message' => 'This announcement should be removed.',
+            'status' => 'Published',
+            'published_at' => now(),
+        ]);
+        ScholarshipNotification::factory()->create([
+            'role' => 'student',
+            'title' => 'Delete Me',
+            'payload' => [
+                'announcementId' => $announcement->id,
+                'programId' => $program->id,
+            ],
+        ]);
+
+        Sanctum::actingAs($officer);
+
+        $this->deleteJson("/api/announcements/{$announcement->id}")
+            ->assertOk()
+            ->assertJsonPath('message', 'Announcement deleted.');
+
+        $this->assertDatabaseMissing(Announcement::class, [
+            'id' => $announcement->id,
+        ]);
+        $this->assertDatabaseMissing(ScholarshipNotification::class, [
+            'title' => 'Delete Me',
+        ]);
+    }
+
     public function test_officer_can_load_rankings_risk_detection_and_report_exports(): void
     {
         $program = ScholarshipProgram::factory()->published()->create([

@@ -29,7 +29,7 @@ class ApplicationController extends Controller
     public function index(Request $request): JsonResponse
     {
         $applications = $this->visibleApplicationsQuery($request)
-            ->with(['documents', 'applicant', 'program'])
+            ->with(['documents', 'applicant', 'program', 'reviewer'])
             ->latest()
             ->get();
 
@@ -53,7 +53,7 @@ class ApplicationController extends Controller
         $programId = (int) $request->query('programId', 0);
 
         $applications = $this->visibleApplicationsQuery($request)
-            ->with(['documents', 'applicant', 'program'])
+            ->with(['documents', 'applicant', 'program', 'reviewer'])
             ->whereIn('status', $this->reviewStatuses())
             ->when(in_array($status, $this->reviewStatuses(), true), fn (Builder $query) => $query->where('status', $status))
             ->when($programId > 0, fn (Builder $query) => $query->where('scholarship_program_id', $programId))
@@ -131,7 +131,7 @@ class ApplicationController extends Controller
         }
 
         return response()->json([
-            'application' => new ScholarshipApplicationResource($application->load(['documents', 'applicant', 'program'])),
+            'application' => new ScholarshipApplicationResource($application->load(['documents', 'applicant', 'program', 'reviewer'])),
         ], $application->wasRecentlyCreated ? 201 : 200);
     }
 
@@ -172,7 +172,7 @@ class ApplicationController extends Controller
         $this->notifyApplicantOfStatus($application, $validated['remarks'] ?? null);
 
         return response()->json([
-            'application' => new ScholarshipApplicationResource($application->load(['documents', 'applicant', 'program'])),
+            'application' => new ScholarshipApplicationResource($application->load(['documents', 'applicant', 'program', 'reviewer'])),
             'removedApplicationIds' => $removedApplicationIds,
         ]);
     }
@@ -230,7 +230,7 @@ class ApplicationController extends Controller
         $this->notifyOfficersOfDocumentUpload($document->refresh(), $application->fresh(['program']));
 
         return response()->json([
-            'application' => new ScholarshipApplicationResource($application->fresh(['documents', 'applicant', 'program'])),
+            'application' => new ScholarshipApplicationResource($application->fresh(['documents', 'applicant', 'program', 'reviewer'])),
             'documents' => ApplicationDocumentResource::collection($application->documents()->orderBy('name')->get()),
         ], 201);
     }
@@ -283,7 +283,7 @@ class ApplicationController extends Controller
         $this->notifyOfficersOfSubmittedApplication($application->fresh(['program']));
 
         return response()->json([
-            'application' => new ScholarshipApplicationResource($application->fresh(['documents', 'applicant', 'program'])),
+            'application' => new ScholarshipApplicationResource($application->fresh(['documents', 'applicant', 'program', 'reviewer'])),
         ]);
     }
 

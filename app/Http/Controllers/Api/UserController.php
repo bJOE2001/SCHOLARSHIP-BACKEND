@@ -8,12 +8,16 @@ use App\Http\Requests\SyncUserProgramsRequest;
 use App\Http\Requests\UpdateUserRequest;
 use App\Http\Requests\UpdateUserStatusRequest;
 use App\Http\Resources\UserResource;
+use App\Models\ScholarshipProgram;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class UserController extends Controller
 {
+    private const DEFAULT_OFFICER_PASSWORD = 'admin';
+
     /**
      * List users for the head officer system users interface.
      */
@@ -167,10 +171,15 @@ class UserController extends Controller
         }
 
         if ($isCreation) {
-            $attributes['password'] = 'password';
+            $role = $attributes['role'] ?? 'student';
+
+            $attributes['password'] = in_array($role, ['head_officer', 'officer'], true)
+                ? self::DEFAULT_OFFICER_PASSWORD
+                : 'password';
+            $attributes['force_password_change'] = in_array($role, ['head_officer', 'officer'], true);
             $attributes['email_verified_at'] = now();
             $attributes['status'] = $attributes['status'] ?? 'Active';
-            $attributes['role'] = $attributes['role'] ?? 'student';
+            $attributes['role'] = $role;
         }
 
         return $attributes;
@@ -210,7 +219,35 @@ class UserController extends Controller
             return;
         }
 
-        $user->assignedPrograms()->sync($this->normalizeProgramIds($programIds));
+        $normalizedProgramIds = $this->normalizeProgramIds($programIds);
+        $this->ensureCompatibleProgramGradePolicy($normalizedProgramIds);
+
+        $user->assignedPrograms()->sync($normalizedProgramIds);
         $user->unsetRelation('assignedPrograms');
+    }
+
+    /**
+     * Officers cannot be assigned to a mix of programs with and without a maintaining grade.
+     *
+     * @param  array<int, int>  $programIds
+     */
+    private function ensureCompatibleProgramGradePolicy(array $programIds): void
+    {
+        if (count($programIds) < 2) {
+            return;
+        }
+
+        $gradePolicyCount = ScholarshipProgram::query()
+            ->whereIn('id', $programIds)
+            ->selectRaw('CASE WHEN maintaining_grade IS NULL OR maintaining_grade <= 0 THEN 0 ELSE 1 END as has_maintaining_grade')
+            ->distinct()
+            ->pluck('has_maintaining_grade')
+            ->count();
+
+        if ($gradePolicyCount > 1) {
+            throw ValidationException::withMessages([
+                'programIds' => ['Assign programs that all either require a maintaining grade or all do not require one.'],
+            ]);
+        }
     }
 }

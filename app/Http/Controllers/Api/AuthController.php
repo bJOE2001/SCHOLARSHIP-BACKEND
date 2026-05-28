@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ChangePasswordRequest;
 use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterStudentRequest;
 use App\Http\Requests\UpdateProfileRequest;
@@ -123,6 +124,39 @@ class AuthController extends Controller
     }
 
     /**
+     * Change the authenticated user's password.
+     */
+    public function changePassword(ChangePasswordRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+        $user = $request->user();
+
+        if (! Hash::check($validated['currentPassword'], $user->password)) {
+            throw ValidationException::withMessages([
+                'currentPassword' => ['The current password is incorrect.'],
+            ]);
+        }
+
+        if (Hash::check($validated['password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'password' => ['The new password must be different from the current password.'],
+            ]);
+        }
+
+        $user->forceFill([
+            'password' => $validated['password'],
+            'force_password_change' => false,
+        ])->save();
+
+        $user->tokens()->where('id', '!=', $request->user()?->currentAccessToken()?->id)->delete();
+
+        return response()->json([
+            'message' => 'Password changed successfully.',
+            'user' => new UserResource($user->refresh()),
+        ]);
+    }
+
+    /**
      * Revoke the current access token.
      */
     public function logout(Request $request): Response
@@ -144,6 +178,7 @@ class AuthController extends Controller
             'name' => $validated['fullName'],
             'email' => $validated['email'],
             'password' => $validated['password'],
+            'force_password_change' => false,
             'role' => 'student',
             'status' => 'Active',
             'gender' => $validated['gender'] ?? null,

@@ -36,6 +36,8 @@ class ScholarshipApplicationResource extends JsonResource
             'submittedAt' => $this->submitted_at?->toISOString(),
             'reviewedAt' => $this->reviewed_at?->toISOString(),
             'reviewedById' => $this->reviewed_by_id,
+            'reviewedByName' => $this->whenLoaded('reviewer', fn (): ?string => $this->reviewer?->name),
+            'approvedByName' => $this->whenLoaded('reviewer', fn (): ?string => $this->reviewer?->name),
             'createdAt' => $this->created_at?->toISOString(),
             'updatedAt' => $this->updated_at?->toISOString(),
         ];

@@ -36,6 +36,7 @@ Route::get('/grant-distribution/announcements', [GrantDistributionController::cl
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::patch('/auth/profile', [AuthController::class, 'updateProfile']);
+    Route::patch('/auth/password', [AuthController::class, 'changePassword']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
 
     Route::get('/applications', [ApplicationController::class, 'index']);
@@ -62,6 +63,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::middleware('role:head_officer,officer')->group(function (): void {
         Route::post('/notifications', [NotificationController::class, 'store']);
         Route::post('/announcements', [AnnouncementController::class, 'store']);
+        Route::delete('/announcements/{announcement}', [AnnouncementController::class, 'destroy']);
 
         Route::apiResource('users', UserController::class)->only(['index', 'store', 'show', 'update']);
         Route::patch('/users/{user}/status', [UserController::class, 'updateStatus']);

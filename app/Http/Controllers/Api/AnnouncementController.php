@@ -83,6 +83,24 @@ class AnnouncementController extends Controller
     }
 
     /**
+     * Delete a published announcement.
+     */
+    public function destroy(Request $request, Announcement $announcement): JsonResponse
+    {
+        abort_unless($this->canManageProgram($request->user(), $announcement->scholarship_program_id), 403);
+
+        ScholarshipNotification::query()
+            ->where('payload->announcementId', $announcement->id)
+            ->delete();
+
+        $announcement->delete();
+
+        return response()->json([
+            'message' => 'Announcement deleted.',
+        ]);
+    }
+
+    /**
      * Determine whether a user can create an announcement for a program.
      */
     private function canManageProgram(?User $user, ?int $programId): bool

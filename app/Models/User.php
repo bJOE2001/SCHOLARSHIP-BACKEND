@@ -34,6 +34,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'force_password_change',
         'role',
         'status',
         'avatar',
@@ -93,6 +94,7 @@ class User extends Authenticatable
             'siblings' => 'integer',
             'studying_siblings' => 'integer',
             'password' => 'hashed',
+            'force_password_change' => 'boolean',
         ];
     }
 

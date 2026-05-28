@@ -446,6 +446,7 @@ class ScholarshipApiTest extends TestCase
         $createResponse->assertCreated();
         $createResponse->assertJsonPath('user.email', 'new.officer@example.com');
         $createResponse->assertJsonPath('user.role', 'officer');
+        $createResponse->assertJsonPath('user.forcePasswordChange', true);
 
         $userId = $createResponse->json('user.id');
 
@@ -456,6 +457,69 @@ class ScholarshipApiTest extends TestCase
         $assignResponse->assertOk();
         $assignResponse->assertJsonPath('user.assignedProgramIds.0', $firstProgram->id);
         $assignResponse->assertJsonPath('user.assignedProgramIds.1', $secondProgram->id);
+    }
+
+    public function test_new_officer_uses_default_password_and_must_change_it(): void
+    {
+        $headOfficer = User::factory()->headOfficer()->create([
+            'name' => 'Password Head Officer',
+            'email' => 'password.head.officer@example.com',
+            'password' => 'password',
+        ]);
+
+        Sanctum::actingAs($headOfficer);
+
+        $this->postJson('/api/users', [
+            'name' => 'Default Password Officer',
+            'email' => 'default.password.officer@example.com',
+            'role' => 'officer',
+        ])->assertCreated()
+            ->assertJsonPath('user.forcePasswordChange', true);
+
+        $loginResponse = $this->postJson('/api/auth/login', [
+            'email' => 'default.password.officer@example.com',
+            'password' => 'admin',
+        ]);
+
+        $loginResponse->assertOk();
+        $loginResponse->assertJsonPath('user.forcePasswordChange', true);
+
+        Sanctum::actingAs(User::query()->where('email', 'default.password.officer@example.com')->firstOrFail());
+
+        $this->patchJson('/api/auth/password', [
+            'currentPassword' => 'admin',
+            'password' => 'NewOfficerPass123!',
+            'password_confirmation' => 'NewOfficerPass123!',
+        ])
+            ->assertOk()
+            ->assertJsonPath('user.forcePasswordChange', false);
+    }
+
+    public function test_officer_cannot_be_assigned_mixed_maintaining_grade_programs(): void
+    {
+        $headOfficer = User::factory()->headOfficer()->create([
+            'name' => 'Program Policy Head Officer',
+            'email' => 'program.policy.head.officer@example.com',
+            'password' => 'password',
+        ]);
+        $officer = User::factory()->officer()->create([
+            'name' => 'Program Policy Officer',
+            'email' => 'program.policy.officer@example.com',
+            'password' => 'password',
+        ]);
+        $withMaintainingGrade = $this->createProgram('Maintaining Grade Program', [
+            'maintaining_grade' => 85,
+        ]);
+        $withoutMaintainingGrade = $this->createProgram('No Maintaining Grade Program', [
+            'maintaining_grade' => null,
+        ]);
+
+        Sanctum::actingAs($headOfficer);
+
+        $this->putJson("/api/users/{$officer->id}/programs", [
+            'programIds' => [$withMaintainingGrade->id, $withoutMaintainingGrade->id],
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors(['programIds']);
     }
 
     public function test_head_officer_can_send_notification_to_one_student(): void

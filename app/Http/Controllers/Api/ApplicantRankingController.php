@@ -87,6 +87,7 @@ class ApplicantRankingController extends Controller
         return match ($status) {
             'Eligible', 'Shortlisted', 'Approved', 'Active Scholar' => 'Recommended',
             'Rejected' => 'Not Recommended',
+            'Application Review Approved' => 'Pending',
             default => 'Pending',
         };
     }

@@ -16,7 +16,11 @@ class ScholarResource extends JsonResource
     {
         $complianceSubmissions = $this->whenLoaded('complianceSubmissions', fn () => $this->complianceSubmissions, collect());
         $latestComplianceSubmission = $complianceSubmissions->first();
-        $submissions = $latestComplianceSubmission?->submissions ?? $this->submissions ?? [];
+        $scholarSubmissions = $this->submissions ?? [];
+        $latestSubmissionRows = $latestComplianceSubmission?->submissions ?? [];
+        $submissions = $this->shouldUseScholarSubmissions($scholarSubmissions, $latestSubmissionRows)
+            ? $scholarSubmissions
+            : $latestSubmissionRows;
         $encodedGradesSubmission = $this->submissionFor($submissions, 'encoded-grades');
         $encodedGrades = $latestComplianceSubmission?->grades
             ?? $encodedGradesSubmission['grades']
@@ -64,6 +68,8 @@ class ScholarResource extends JsonResource
             'grades' => $encodedGrades,
             'gradeRows' => $encodedGrades,
             'encodedGrades' => $encodedGrades,
+            'semesterSubmissionRequired' => $this->hasSemesterRequirementRequest($submissions),
+            'semesterSubmissionRequestedAt' => $this->latestSemesterRequirementRequestedAt($submissions),
             'semesterSubmissionStatus' => $latestComplianceSubmission?->status ?? $encodedGradesSubmission['status'] ?? null,
             'latestComplianceSubmission' => $latestComplianceSubmission ? $this->complianceSubmissionPayload($latestComplianceSubmission) : null,
             'complianceHistory' => $complianceSubmissions->isNotEmpty()
@@ -148,5 +154,51 @@ class ScholarResource extends JsonResource
     private function submissionStatus(array $submissions, string $key): ?string
     {
         return $this->submissionFor($submissions, $key)['status'] ?? null;
+    }
+
+    /**
+     * Prefer the scholar's reset semester requirement payload when it is newer.
+     *
+     * @param array<int, array<string, mixed>> $scholarSubmissions
+     * @param array<int, array<string, mixed>> $latestSubmissionRows
+     */
+    private function shouldUseScholarSubmissions(array $scholarSubmissions, array $latestSubmissionRows): bool
+    {
+        $scholarRequestedAt = $this->latestSemesterRequirementRequestedAt($scholarSubmissions);
+
+        if ($scholarRequestedAt === null) {
+            return $latestSubmissionRows === [];
+        }
+
+        $latestSubmissionRequestedAt = $this->latestSemesterRequirementRequestedAt($latestSubmissionRows);
+
+        return $latestSubmissionRequestedAt === null || $scholarRequestedAt >= $latestSubmissionRequestedAt;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $submissions
+     */
+    private function hasSemesterRequirementRequest(array $submissions): bool
+    {
+        return $this->latestSemesterRequirementRequestedAt($submissions) !== null;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $submissions
+     */
+    private function latestSemesterRequirementRequestedAt(array $submissions): ?string
+    {
+        $requestedAt = collect($submissions)
+            ->filter(function (array $submission): bool {
+                $key = $submission['key'] ?? str($submission['requirement'] ?? $submission['name'] ?? '')->lower()->slug('-')->toString();
+
+                return in_array($key, ['coe', 'cor', 'encoded-grades'], true);
+            })
+            ->pluck('requestedAt')
+            ->filter()
+            ->sort()
+            ->last();
+
+        return is_string($requestedAt) ? $requestedAt : null;
     }
 }

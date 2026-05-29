@@ -30,6 +30,7 @@ class ScholarController extends Controller
 
         $scholars = Scholar::query()
             ->with(['complianceSubmissions' => fn ($query) => $query->latest('submitted_at')->latest()])
+            ->whereIn('scholarship_status', $this->activeScholarStatuses())
             ->when($currentUser?->isStudent(), fn ($query) => $query->where('user_id', $currentUser->id))
             ->when($currentUser?->isOfficer() && ! $currentUser?->isSuperAdmin(), function ($query) use ($currentUser): void {
                 $programIds = $this->assignedProgramIds($currentUser);
@@ -166,6 +167,12 @@ class ScholarController extends Controller
 
         $grades = $this->normalizeGradeRows($validated['grades']);
         $average = $validated['gpa'] ?? $this->computeAverage($grades);
+        $gradesStatus = $validated['gradesStatus'] ?? $validated['semesterSubmissionStatus'] ?? 'Submitted';
+
+        if ($grades !== [] && in_array($gradesStatus, ['Missing', 'Not Yet Submitted'], true)) {
+            $gradesStatus = 'Submitted';
+        }
+
         $submittedAt = now();
         $submissions = $this->buildComplianceSubmissionEntries(
             $scholar,
@@ -176,7 +183,7 @@ class ScholarController extends Controller
             [
                 'coe' => $validated['coeStatus'] ?? null,
                 'cor' => $validated['corStatus'] ?? null,
-                'encoded-grades' => $validated['gradesStatus'] ?? $validated['semesterSubmissionStatus'] ?? 'Submitted',
+                'encoded-grades' => $gradesStatus,
             ],
         );
 
@@ -293,6 +300,52 @@ class ScholarController extends Controller
         return response()->json([
             'message' => 'Requirement request sent.',
         ], 201);
+    }
+
+    /**
+     * Remove a scholar from active monitoring without deleting historical records.
+     */
+    public function destroy(Request $request, Scholar $scholar): JsonResponse
+    {
+        abort_unless($request->user()?->isAdmin(), 403);
+        abort_unless($this->canAccessScholar($request->user(), $scholar), 403);
+
+        $message = 'Removed from active scholars by '.$request->user()->name.'.';
+
+        $scholar->update([
+            'scholarship_status' => 'Removed',
+            'renewal_status' => 'Removed',
+            'compliance_status' => 'Removed',
+            'recommended_action' => $message,
+            'risk_label' => 'Removed',
+            'risk_reason' => $message,
+        ]);
+
+        if ($scholar->application !== null) {
+            $scholar->application->appendTimelineEvent('Removed', $message);
+            $scholar->application->update([
+                'status' => 'Removed',
+                'remarks' => $message,
+                'next_action' => 'Scholar is no longer monitored as active.',
+            ]);
+        }
+
+        ScholarshipNotification::create([
+            'user_id' => $scholar->user_id,
+            'role' => null,
+            'type' => 'status',
+            'title' => 'Active Scholar Status Removed',
+            'message' => 'Your scholarship record was removed from active scholar monitoring.',
+            'notified_at' => now(),
+            'payload' => [
+                'scholarId' => $scholar->id,
+                'scholarshipStatus' => 'Removed',
+            ],
+        ]);
+
+        return response()->json([
+            'message' => 'Scholar removed from active scholars.',
+        ]);
     }
 
     /**
@@ -606,6 +659,25 @@ class ScholarController extends Controller
             'Approved',
             'Accepted',
             'Enrollment Verified',
+            'Active Scholar',
+            'Pending Renewal',
+            'Under Renewal Review',
+            'Probation',
+            'Suspended',
+            'Renewal Pending',
+            'Renewed',
+        ];
+    }
+
+    /**
+     * Return scholar statuses that are still part of active monitoring.
+     *
+     * @return array<int, string>
+     */
+    private function activeScholarStatuses(): array
+    {
+        return [
+            'Active',
             'Active Scholar',
             'Pending Renewal',
             'Under Renewal Review',

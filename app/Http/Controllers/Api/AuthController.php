@@ -20,6 +20,8 @@ use Throwable;
 
 class AuthController extends Controller
 {
+    private const DEFAULT_OFFICER_PASSWORDS = ['admin', 'password'];
+
     /**
      * Log a user into the API with a Sanctum token.
      */
@@ -39,6 +41,22 @@ class AuthController extends Controller
                 'email' => ['This account is inactive.'],
             ]);
         }
+
+        $portal = $validated['portal'] ?? null;
+
+        if ($portal === 'student' && ! $user->isStudent()) {
+            throw ValidationException::withMessages([
+                'portal' => ['Please use the officer portal for this account.'],
+            ]);
+        }
+
+        if ($portal === 'officer' && ! $user->isOfficer()) {
+            throw ValidationException::withMessages([
+                'portal' => ['Please use the student portal for this account.'],
+            ]);
+        }
+
+        $this->markDefaultOfficerPasswordForChange($user, $validated['password']);
 
         $deviceName = $validated['deviceName'] ?? 'scholarship-web';
         $token = $user->createToken($deviceName)->plainTextToken;
@@ -303,6 +321,24 @@ class AuthController extends Controller
         }
 
         return $user->birth_date->format('mdy');
+    }
+
+    /**
+     * Existing officer accounts that still use the default password must update it.
+     */
+    private function markDefaultOfficerPasswordForChange(User $user, string $plainPassword): void
+    {
+        if (
+            ! $user->isOfficer() ||
+            $user->force_password_change ||
+            ! in_array($plainPassword, self::DEFAULT_OFFICER_PASSWORDS, true)
+        ) {
+            return;
+        }
+
+        $user->forceFill([
+            'force_password_change' => true,
+        ])->save();
     }
 
     /**

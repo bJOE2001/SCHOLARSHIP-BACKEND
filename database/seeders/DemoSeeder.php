@@ -860,6 +860,7 @@ class DemoSeeder extends Seeder
     {
         return [
             'password' => 'password',
+            'force_password_change' => ! $isStudent,
             'role' => $isStudent ? 'student' : 'officer',
             'status' => 'Active',
             'department' => $isStudent ? null : 'Scholarship Programs Office',

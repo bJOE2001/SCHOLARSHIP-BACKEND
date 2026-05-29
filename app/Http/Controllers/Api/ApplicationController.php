@@ -20,6 +20,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class ApplicationController extends Controller
 {
@@ -101,12 +102,25 @@ class ApplicationController extends Controller
 
         $this->syncStudentProfile($student, $validated);
 
-        $application = ScholarshipApplication::firstOrCreate(
-            [
+        $currentCycleApplication = ScholarshipApplication::query()
+            ->where('applicant_id', $student->id)
+            ->where('scholarship_program_id', $program->id)
+            ->latest()
+            ->get()
+            ->first(fn (ScholarshipApplication $application): bool => $this->belongsToCurrentProgramCycle($application, $program));
+
+        if ($currentCycleApplication !== null && in_array($currentCycleApplication->status, ['Rejected', 'Ineligible', 'Terminated'], true)) {
+            throw ValidationException::withMessages([
+                'programId' => ['You cannot apply for this scholarship again yet. Please wait until applications close and reopen for a new application period.'],
+            ]);
+        }
+
+        $application = $currentCycleApplication;
+
+        if ($application === null) {
+            $application = ScholarshipApplication::create([
                 'applicant_id' => $student->id,
                 'scholarship_program_id' => $program->id,
-            ],
-            [
                 'application_no' => $this->buildApplicationNumber($student->id, $program->id),
                 'status' => 'Draft',
                 'risk_label' => 'Stable',
@@ -120,13 +134,10 @@ class ApplicationController extends Controller
                         'status' => 'Draft',
                         'label' => 'Draft Created',
                         'remarks' => 'Draft application created.',
-                        'date' => now()->format('M d, Y'),
+                        'date' => now()->toISOString(),
                     ],
                 ],
-            ],
-        );
-
-        if ($application->wasRecentlyCreated) {
+            ]);
             $this->seedRequirementDocuments($application, $program);
         }
 
@@ -523,6 +534,7 @@ class ApplicationController extends Controller
             'Needs Revision',
             'Resubmitted',
             'Under Review',
+            'Application Review Approved',
             'Eligible',
             'Shortlisted',
         ];
@@ -597,6 +609,18 @@ class ApplicationController extends Controller
     }
 
     /**
+     * A reopened program starts a fresh application cycle for rejected applicants.
+     */
+    private function belongsToCurrentProgramCycle(ScholarshipApplication $application, ScholarshipProgram $program): bool
+    {
+        if ($program->published_at === null) {
+            return true;
+        }
+
+        return $application->created_at?->greaterThanOrEqualTo($program->published_at) ?? true;
+    }
+
+    /**
      * Return the configured active application statuses.
      *
      * @return array<int, string>
@@ -625,10 +649,7 @@ class ApplicationController extends Controller
     private function reviewStatuses(): array
     {
         return [
-            'Submitted',
             'Under Review',
-            'Eligible',
-            'Shortlisted',
         ];
     }
 
@@ -641,6 +662,7 @@ class ApplicationController extends Controller
             'Draft' => 0,
             'Submitted' => 25,
             'Under Review' => 50,
+            'Application Review Approved' => 60,
             'Eligible' => 75,
             'Shortlisted' => 90,
             'Approved' => 100,
@@ -681,7 +703,7 @@ class ApplicationController extends Controller
             'Rejected', 'Terminated', 'Suspended' => 'High Risk',
             'Probation' => 'Medium Risk',
             'For Revision', 'Needs Revision' => 'At Risk',
-            'Submitted', 'Resubmitted', 'Under Review', 'Renewal Pending', 'Pending Renewal', 'Under Renewal Review' => 'Medium Risk',
+            'Submitted', 'Resubmitted', 'Under Review', 'Application Review Approved', 'Renewal Pending', 'Pending Renewal', 'Under Renewal Review' => 'Medium Risk',
             default => 'Low Risk',
         };
     }
@@ -694,7 +716,7 @@ class ApplicationController extends Controller
         return match ($status) {
             'Rejected', 'Terminated', 'Suspended' => 'Non-Compliant',
             'For Revision', 'Needs Revision' => 'Incomplete',
-            'Submitted', 'Resubmitted', 'Under Review', 'Under Renewal Review' => 'Incomplete',
+            'Submitted', 'Resubmitted', 'Under Review', 'Application Review Approved', 'Under Renewal Review' => 'Incomplete',
             'Renewal Pending', 'Pending Renewal', 'Probation' => 'Late Submission',
             default => 'Compliant',
         };
@@ -726,6 +748,7 @@ class ApplicationController extends Controller
             'Submitted' => 'Wait for initial screening.',
             'Resubmitted' => 'Review resubmitted requirements.',
             'Under Review' => 'Review documents and compute scores.',
+            'Application Review Approved' => 'Validate all submitted documents.',
             'Eligible' => 'Shortlist the applicant when ready.',
             'Shortlisted' => 'Prepare final scholarship approval.',
             'Approved' => 'Scholar approved successfully.',
@@ -753,6 +776,7 @@ class ApplicationController extends Controller
             'Rejected', 'Terminated' => 'Application was not approved.',
             'For Revision', 'Needs Revision' => 'Requirements are still incomplete.',
             'Under Review' => 'Application is under active review.',
+            'Application Review Approved' => 'Application review is approved and awaiting document validation.',
             'Renewal Pending' => 'Scholar is waiting for renewal verification.',
             default => 'Scholarship record is in a healthy state.',
         };

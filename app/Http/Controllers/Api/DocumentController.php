@@ -58,7 +58,7 @@ class DocumentController extends Controller
                     $missingRequirements,
                     static fn (string $requirement): bool => $requirement !== $document->name,
                 ));
-            } elseif (in_array($validated['status'], ['Rejected', 'Missing'], true)) {
+            } elseif (in_array($validated['status'], ['Needs Revision', 'Rejected', 'Missing'], true)) {
                 $missingRequirements[] = $document->name;
                 $missingRequirements = array_values(array_unique($missingRequirements));
             }
@@ -86,7 +86,11 @@ class DocumentController extends Controller
         ?string $remarks,
     ): void {
         $programName = $application->program?->name ?? 'your scholarship application';
-        $message = "Your {$document->name} document for {$programName} is now {$document->status}.";
+        $isRevisionRequest = $document->status === 'Needs Revision';
+        $title = $isRevisionRequest ? 'Document Revision Requested' : 'Document Status Updated';
+        $message = $isRevisionRequest
+            ? "Your {$document->name} document for {$programName} needs revision. Please upload a corrected file."
+            : "Your {$document->name} document for {$programName} is now {$document->status}.";
 
         if ($remarks !== null && trim($remarks) !== '') {
             $message .= ' Remarks: '.trim($remarks);
@@ -96,7 +100,7 @@ class DocumentController extends Controller
             'user_id' => $application->applicant_id,
             'role' => null,
             'type' => $this->notificationTypeForDocumentStatus($document->status),
-            'title' => 'Document Status Updated',
+            'title' => $title,
             'message' => $message,
             'notified_at' => now(),
             'payload' => [
@@ -114,7 +118,7 @@ class DocumentController extends Controller
     {
         return match ($status) {
             'Accepted' => 'success',
-            'Rejected', 'Missing' => 'warning',
+            'Needs Revision', 'Rejected', 'Missing' => 'warning',
             default => 'status',
         };
     }

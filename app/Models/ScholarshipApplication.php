@@ -113,7 +113,7 @@ class ScholarshipApplication extends Model
             'status' => $status,
             'label' => $status,
             'remarks' => $remarks,
-            'date' => now()->format('M d, Y'),
+            'date' => now()->toISOString(),
         ];
 
         $this->timeline = $timeline;

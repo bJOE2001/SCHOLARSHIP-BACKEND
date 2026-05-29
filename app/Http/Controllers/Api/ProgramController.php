@@ -88,9 +88,10 @@ class ProgramController extends Controller
     public function update(UpdateProgramRequest $request, ScholarshipProgram $program): JsonResponse
     {
         $validated = $request->validated();
+        $previousStatus = $program->status;
         $program->fill($this->mapProgramAttributes($validated));
 
-        if ($program->status === 'Open' && $program->published_at === null) {
+        if ($program->status === 'Open' && ($program->published_at === null || ! in_array($previousStatus, ['Open', 'Closing Soon'], true))) {
             $program->published_at = now();
         }
 

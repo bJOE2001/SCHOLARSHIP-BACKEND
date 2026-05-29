@@ -93,6 +93,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/grant-distribution/batches/{grantBatch}/beneficiaries/{grantBeneficiary}/release', [GrantDistributionController::class, 'release']);
 
         Route::post('/scholars/semester-requirements/require-all', [ScholarController::class, 'requireSemesterRequirementsForAll']);
+        Route::delete('/scholars/{scholar}', [ScholarController::class, 'destroy']);
         Route::patch('/scholars/{scholar}/compliance', [ScholarController::class, 'updateCompliance']);
         Route::post('/scholars/{scholar}/requirement-requests', [ScholarController::class, 'sendRequirementRequest']);
     });

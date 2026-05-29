@@ -11,6 +11,7 @@ use App\Models\ScholarshipProgram;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
@@ -580,6 +581,8 @@ class ScholarshipApiTest extends TestCase
 
     public function test_head_officer_can_accept_application_and_create_scholar_record(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-05-29 10:15:00', 'Asia/Manila'));
+
         $headOfficer = User::factory()->headOfficer()->create([
             'name' => 'Review Head Officer',
             'email' => 'review.head.officer@example.com',
@@ -656,6 +659,8 @@ class ScholarshipApiTest extends TestCase
 
         $response->assertOk();
         $response->assertJsonPath('application.status', 'Accepted');
+        $response->assertJsonPath('application.reviewedAt', now()->toISOString());
+        $response->assertJsonPath('application.timeline.2.date', now()->toISOString());
         $this->assertDatabaseHas('scholars', [
             'scholarship_application_id' => $application->id,
             'name' => $studentUser->name,
@@ -670,6 +675,8 @@ class ScholarshipApiTest extends TestCase
             'type' => 'success',
             'title' => 'Application Status Updated',
         ]);
+
+        Carbon::setTestNow();
     }
 
     public function test_officer_application_review_queue_returns_assigned_review_applications_with_applicant_data(): void

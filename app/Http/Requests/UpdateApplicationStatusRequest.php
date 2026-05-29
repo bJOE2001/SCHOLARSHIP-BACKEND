@@ -29,6 +29,7 @@ class UpdateApplicationStatusRequest extends FormRequest
                 'Submitted',
                 'Resubmitted',
                 'Under Review',
+                'Application Review Approved',
                 'For Revision',
                 'Needs Revision',
                 'Eligible',

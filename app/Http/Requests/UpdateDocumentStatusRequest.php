@@ -24,7 +24,7 @@ class UpdateDocumentStatusRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => ['required', Rule::in(['Pending', 'Accepted', 'Rejected', 'Missing'])],
+            'status' => ['required', Rule::in(['Pending', 'Accepted', 'Needs Revision', 'Rejected', 'Missing'])],
             'remarks' => ['nullable', 'string'],
         ];
     }

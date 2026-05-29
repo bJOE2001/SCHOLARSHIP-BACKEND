@@ -211,8 +211,6 @@ class ScholarshipApiTest extends TestCase
             'schedule' => [
                 'opening' => 'May 01, 2026',
                 'deadline' => 'June 01, 2026',
-                'screening' => 'June 10, 2026',
-                'awarding' => 'June 20, 2026',
             ],
             'eligibility' => ['Currently enrolled'],
             'requirements' => ['Transcript'],
@@ -236,8 +234,6 @@ class ScholarshipApiTest extends TestCase
             'schedule' => [
                 'opening' => 'January 01, 2026',
                 'deadline' => 'February 01, 2026',
-                'screening' => 'February 10, 2026',
-                'awarding' => 'February 20, 2026',
             ],
             'eligibility' => ['Currently enrolled'],
             'requirements' => ['Transcript'],
@@ -285,7 +281,7 @@ class ScholarshipApiTest extends TestCase
             'applicantStudentId' => 'STU-2026-001',
             'course' => 'BS Information Technology',
             'yearLevel' => '3rd Year',
-            'semester' => 'First Semester',
+            'semester' => '1st Semester',
             'academicYear' => '2026-2027',
             'gpa' => 93.25,
             'familyIncome' => 120000,
@@ -479,7 +475,7 @@ class ScholarshipApiTest extends TestCase
 
         $loginResponse = $this->postJson('/api/auth/login', [
             'email' => 'default.password.officer@example.com',
-            'password' => 'admin',
+            'password' => 'password',
         ]);
 
         $loginResponse->assertOk();
@@ -488,7 +484,7 @@ class ScholarshipApiTest extends TestCase
         Sanctum::actingAs(User::query()->where('email', 'default.password.officer@example.com')->firstOrFail());
 
         $this->patchJson('/api/auth/password', [
-            'currentPassword' => 'admin',
+            'currentPassword' => 'password',
             'password' => 'NewOfficerPass123!',
             'password_confirmation' => 'NewOfficerPass123!',
         ])
@@ -879,8 +875,6 @@ class ScholarshipApiTest extends TestCase
             'schedule' => [
                 'opening' => 'May 01, 2026',
                 'deadline' => 'June 01, 2026',
-                'screening' => 'June 10, 2026',
-                'awarding' => 'June 20, 2026',
             ],
             'eligibility' => ['Currently enrolled'],
             'requirements' => ['Transcript'],

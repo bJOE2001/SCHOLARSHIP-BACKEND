@@ -41,6 +41,7 @@ class UserResource extends JsonResource
             'academicYear' => $this->academic_year,
             'gpa' => $this->gpa,
             'familyIncome' => $this->family_income,
+            'annualFamilyIncome' => $this->family_income,
             'enrollmentStatus' => $this->enrollment_status,
             'academicAwards' => $this->academic_awards,
             'fatherName' => $this->father_name,

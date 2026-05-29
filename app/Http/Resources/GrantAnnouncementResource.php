@@ -23,6 +23,7 @@ class GrantAnnouncementResource extends JsonResource
             'semester' => $this->semester,
             'schoolYear' => $this->school_year,
             'venue' => $this->venue,
+            'remarks' => $this->remarks ?? $this->whenLoaded('batch', fn () => $this->batch?->remarks),
             'totalBeneficiaries' => $this->total_beneficiaries,
             'createdBy' => $this->created_by_name,
             'batch' => new GrantBatchResource($this->whenLoaded('batch')),

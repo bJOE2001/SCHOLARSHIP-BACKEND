@@ -16,7 +16,7 @@ use Illuminate\Validation\ValidationException;
 
 class UserController extends Controller
 {
-    private const DEFAULT_OFFICER_PASSWORD = 'admin';
+    private const DEFAULT_OFFICER_PASSWORD = 'password';
 
     /**
      * List users for the head officer system users interface.

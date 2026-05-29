@@ -34,7 +34,7 @@ class AnalyticsController extends Controller
             'analytics' => [
                 'refreshedAt' => now()->format('M d, Y h:i A'),
                 'trend' => $this->buildTrend($applications, $scholars),
-                'programDistribution' => $this->buildProgramDistribution($programs, $applications),
+                'programDistribution' => $this->buildProgramDistribution($programs, $scholars),
                 'riskSummary' => $this->buildRiskSummary($scholars),
                 'complianceSummary' => $this->buildComplianceSummary($scholars),
                 'forecasts' => $this->buildForecasts($scholars),
@@ -106,18 +106,18 @@ class AnalyticsController extends Controller
      *
      * @return array<int, array<string, mixed>>
      */
-    private function buildProgramDistribution(iterable $programs, iterable $applications): array
+    private function buildProgramDistribution(iterable $programs, iterable $scholars): array
     {
         return collect($programs)
-            ->map(function (ScholarshipProgram $program) use ($applications): array {
-                $applicationCount = collect($applications)
+            ->map(function (ScholarshipProgram $program) use ($scholars): array {
+                $activeScholarCount = collect($scholars)
                     ->where('scholarship_program_id', $program->id)
                     ->count();
 
                 return [
                     'label' => $program->name,
                     'programId' => $program->id,
-                    'count' => $applicationCount,
+                    'count' => $activeScholarCount,
                 ];
             })
             ->values()
@@ -223,6 +223,10 @@ class AnalyticsController extends Controller
         $user = $request->user();
 
         if ($user === null || $user->isSuperAdmin()) {
+            return null;
+        }
+
+        if ($user->isSuperAdmin()) {
             return null;
         }
 

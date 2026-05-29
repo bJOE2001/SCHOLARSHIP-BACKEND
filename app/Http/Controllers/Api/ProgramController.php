@@ -185,6 +185,11 @@ class ProgramController extends Controller
             }
         }
 
+        if (isset($attributes['schedule']) && is_array($attributes['schedule'])) {
+            unset($attributes['schedule']['awarding']);
+            unset($attributes['schedule']['screening']);
+        }
+
         if (array_key_exists('requirements', $validated) && ! array_key_exists('requirementRules', $validated)) {
             $attributes['requirement_rules'] = ScholarshipProgram::defaultRequirementRules($validated['requirements']);
         }

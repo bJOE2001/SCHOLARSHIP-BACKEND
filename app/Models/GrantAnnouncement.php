@@ -26,6 +26,7 @@ class GrantAnnouncement extends Model
         'semester',
         'school_year',
         'venue',
+        'remarks',
         'total_beneficiaries',
         'created_by_name',
     ];

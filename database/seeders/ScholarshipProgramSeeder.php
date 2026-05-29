@@ -42,8 +42,6 @@ class ScholarshipProgramSeeder extends Seeder
                 'schedule' => [
                     'opening' => 'May 01, 2026',
                     'deadline' => 'June 15, 2026',
-                    'screening' => 'June 20, 2026',
-                    'awarding' => 'July 01, 2026',
                 ],
                 'eligibility' => [
                     'Must be a currently enrolled student',

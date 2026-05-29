@@ -38,8 +38,6 @@ class UpdateProgramRequest extends FormRequest
             'schedule' => ['nullable', 'array'],
             'schedule.opening' => ['nullable', 'string', 'max:100'],
             'schedule.deadline' => ['nullable', 'string', 'max:100'],
-            'schedule.screening' => ['nullable', 'string', 'max:100'],
-            'schedule.awarding' => ['nullable', 'string', 'max:100'],
             'eligibility' => ['nullable', 'array'],
             'eligibility.*' => ['string', 'max:255'],
             'requirements' => ['nullable', 'array'],

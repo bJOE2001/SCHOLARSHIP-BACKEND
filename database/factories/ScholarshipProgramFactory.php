@@ -53,8 +53,6 @@ class ScholarshipProgramFactory extends Factory
             'schedule' => [
                 'opening' => fake()->date('M d, Y'),
                 'deadline' => fake()->date('M d, Y'),
-                'screening' => fake()->date('M d, Y'),
-                'awarding' => fake()->date('M d, Y'),
             ],
             'eligibility' => [
                 'Must be a currently enrolled student',

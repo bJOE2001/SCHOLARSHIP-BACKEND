@@ -49,7 +49,7 @@ class UpdateProfileRequest extends FormRequest
             'schoolName' => ['nullable', 'string', 'max:255'],
             'course' => ['nullable', 'string', 'max:255'],
             'yearLevel' => ['nullable', 'string', 'max:50'],
-            'semester' => ['nullable', 'string', 'max:50'],
+            'semester' => ['nullable', Rule::in(['1st Semester', '2nd Semester'])],
             'academicYear' => ['nullable', 'string', 'max:50'],
             'gpa' => ['nullable', 'numeric', 'min:1', 'max:100'],
             'familyIncome' => ['nullable', 'numeric', 'min:0'],

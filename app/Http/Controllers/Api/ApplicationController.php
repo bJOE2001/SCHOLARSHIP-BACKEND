@@ -649,6 +649,7 @@ class ApplicationController extends Controller
     private function reviewStatuses(): array
     {
         return [
+            'Submitted',
             'Under Review',
         ];
     }

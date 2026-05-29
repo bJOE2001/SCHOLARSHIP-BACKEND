@@ -27,7 +27,7 @@ class StoreGrantBatchRequest extends FormRequest
             'title' => ['nullable', 'string', 'max:255'],
             'programId' => ['required', 'integer', 'exists:scholarship_programs,id'],
             'programName' => ['nullable', 'string', 'max:255'],
-            'semester' => ['required', 'string', 'max:255'],
+            'semester' => ['required', 'string', Rule::in(['1st Semester', '2nd Semester'])],
             'schoolYear' => ['required', 'string', 'max:255'],
             'amount' => ['required', 'numeric', 'min:0'],
             'claimingStartDate' => ['required', 'date'],

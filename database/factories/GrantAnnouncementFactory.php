@@ -32,6 +32,7 @@ class GrantAnnouncementFactory extends Factory
             'semester' => fake()->randomElement(['1st Semester', '2nd Semester']),
             'school_year' => '2025-2026',
             'venue' => 'Scholarship Programs Office',
+            'remarks' => fake()->optional()->sentence(),
             'total_beneficiaries' => fake()->numberBetween(10, 80),
             'created_by_name' => fake()->name(),
         ];

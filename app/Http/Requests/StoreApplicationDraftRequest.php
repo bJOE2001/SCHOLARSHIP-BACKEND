@@ -41,7 +41,7 @@ class StoreApplicationDraftRequest extends FormRequest
             'applicantStudentId' => ['nullable', 'string', 'max:100'],
             'course' => ['nullable', 'string', 'max:255'],
             'yearLevel' => ['nullable', 'string', 'max:50'],
-            'semester' => ['nullable', 'string', 'max:50'],
+            'semester' => ['nullable', Rule::in(['1st Semester', '2nd Semester'])],
             'academicYear' => ['nullable', 'string', 'max:50'],
             'gpa' => ['nullable', 'numeric', 'min:1', 'max:100'],
             'familyIncome' => ['nullable', 'numeric', 'min:0'],

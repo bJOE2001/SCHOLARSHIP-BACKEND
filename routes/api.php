@@ -87,6 +87,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
         Route::post('/grant-distribution/batches', [GrantDistributionController::class, 'store']);
         Route::patch('/grant-distribution/batches/{grantBatch}', [GrantDistributionController::class, 'update']);
+        Route::delete('/grant-distribution/batches/{grantBatch}', [GrantDistributionController::class, 'destroy']);
         Route::post('/grant-distribution/batches/{grantBatch}/notify', [GrantDistributionController::class, 'notify']);
         Route::post('/grant-distribution/batches/{grantBatch}/announcements', [GrantDistributionController::class, 'announce']);
         Route::patch('/grant-distribution/batches/{grantBatch}/close', [GrantDistributionController::class, 'close']);

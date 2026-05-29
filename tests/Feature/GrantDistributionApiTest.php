@@ -6,6 +6,7 @@ use App\Models\Scholar;
 use App\Models\ScholarshipProgram;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -98,6 +99,7 @@ class GrantDistributionApiTest extends TestCase
         $this->postJson("/api/grant-distribution/batches/{$batchId}/announcements")
             ->assertCreated()
             ->assertJsonPath('announcement.programName', 'Release Program')
+            ->assertJsonPath('announcement.remarks', 'Bring a valid ID.')
             ->assertJsonPath('announcement.totalBeneficiaries', 2);
 
         $this->getJson('/api/grant-distribution/announcements')
@@ -124,6 +126,89 @@ class GrantDistributionApiTest extends TestCase
             'claim_status' => 'Claimed',
             'reference_number' => 'REL-2026-0001',
         ]);
+    }
+
+    public function test_batch_update_removes_unclaimed_beneficiaries_but_preserves_claimed_records(): void
+    {
+        $headOfficer = User::factory()->headOfficer()->create([
+            'name' => 'Grant Officer',
+        ]);
+        $program = ScholarshipProgram::factory()->published()->create();
+        $claimedScholar = $this->createScholar($program, 'Already Claimed');
+        $removedScholar = $this->createScholar($program, 'Move Later');
+        $replacementScholar = $this->createScholar($program, 'Replacement Scholar');
+
+        Sanctum::actingAs($headOfficer);
+
+        $batchResponse = $this->postJson('/api/grant-distribution/batches', $this->batchPayload($program, [
+            ['id' => $claimedScholar->id],
+            ['id' => $removedScholar->id],
+        ]))->assertCreated();
+        $batchId = $batchResponse->json('batch.id');
+        $claimedBeneficiaryId = $batchResponse->json('batch.beneficiaries.0.id');
+
+        $this->postJson("/api/grant-distribution/batches/{$batchId}/beneficiaries/{$claimedBeneficiaryId}/release", [
+            'referenceNumber' => 'REL-2026-KEEP',
+            'claimMethod' => 'Cash',
+        ])->assertOk();
+
+        $this->patchJson("/api/grant-distribution/batches/{$batchId}", $this->batchPayload($program, [
+            ['id' => $replacementScholar->id],
+        ]))
+            ->assertOk()
+            ->assertJsonCount(2, 'batch.beneficiaries');
+
+        $this->assertDatabaseHas('grant_beneficiaries', [
+            'id' => $claimedBeneficiaryId,
+            'scholar_id' => $claimedScholar->id,
+            'claim_status' => 'Claimed',
+        ]);
+        $this->assertDatabaseMissing('grant_beneficiaries', [
+            'grant_batch_id' => $batchId,
+            'scholar_id' => $removedScholar->id,
+        ]);
+        $this->assertDatabaseHas('grant_beneficiaries', [
+            'grant_batch_id' => $batchId,
+            'scholar_id' => $replacementScholar->id,
+            'claim_status' => 'For Claiming',
+        ]);
+    }
+
+    public function test_batch_can_only_be_deleted_before_claiming_day_starts(): void
+    {
+        Carbon::setTestNow('2026-05-24 08:00:00');
+
+        $headOfficer = User::factory()->headOfficer()->create();
+        $program = ScholarshipProgram::factory()->published()->create();
+        $scholar = $this->createScholar($program, 'Delete Scholar');
+
+        Sanctum::actingAs($headOfficer);
+
+        $batchId = $this->postJson('/api/grant-distribution/batches', $this->batchPayload($program, [
+            ['id' => $scholar->id],
+        ]))->assertCreated()->json('batch.id');
+
+        $this->deleteJson("/api/grant-distribution/batches/{$batchId}")
+            ->assertNoContent();
+
+        $this->assertDatabaseMissing('grant_batches', [
+            'id' => $batchId,
+        ]);
+
+        Carbon::setTestNow('2026-05-25 08:00:00');
+
+        $blockedBatchId = $this->postJson('/api/grant-distribution/batches', $this->batchPayload($program, [
+            ['id' => $scholar->id],
+        ]))->assertCreated()->json('batch.id');
+
+        $this->deleteJson("/api/grant-distribution/batches/{$blockedBatchId}")
+            ->assertUnprocessable();
+
+        $this->assertDatabaseHas('grant_batches', [
+            'id' => $blockedBatchId,
+        ]);
+
+        Carbon::setTestNow();
     }
 
     /**

@@ -732,6 +732,7 @@ class DemoSeeder extends Seeder
                 'semester' => $grantBatch->semester,
                 'school_year' => $grantBatch->school_year,
                 'venue' => $grantBatch->venue,
+                'remarks' => $grantBatch->remarks,
                 'total_beneficiaries' => $grantBatch->beneficiaries()->count(),
                 'created_by_name' => $createdBy->name,
             ],
@@ -900,8 +901,6 @@ class DemoSeeder extends Seeder
             'schedule' => [
                 'opening' => now()->subWeeks(2)->format('M d, Y'),
                 'deadline' => now()->addWeeks(2)->format('M d, Y'),
-                'screening' => now()->addWeeks(3)->format('M d, Y'),
-                'awarding' => now()->addMonth()->format('M d, Y'),
             ],
             'eligibility' => [
                 'Must be a currently enrolled student',

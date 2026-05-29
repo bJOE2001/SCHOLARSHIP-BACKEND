@@ -19,6 +19,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -79,6 +80,7 @@ class GrantDistributionController extends Controller
 
         $this->assertCanManageProgram($request->user(), $program->id);
         $this->assertScholarsMatchProgram($validated['scholars'], $program->id);
+        $this->assertScholarsNotClaimedForCycle($validated['scholars'], $program->id, $validated['semester'], $validated['schoolYear']);
 
         $batch = DB::transaction(function () use ($request, $validated, $program): GrantBatch {
             $batch = GrantBatch::create($this->batchAttributes($validated, $program, $request->user()));
@@ -103,6 +105,7 @@ class GrantDistributionController extends Controller
         $this->assertCanManageBatch($request->user(), $grantBatch);
         $this->assertCanManageProgram($request->user(), $program->id);
         $this->assertScholarsMatchProgram($validated['scholars'], $program->id);
+        $this->assertScholarsNotClaimedForCycle($validated['scholars'], $program->id, $validated['semester'], $validated['schoolYear'], $grantBatch->id);
 
         DB::transaction(function () use ($grantBatch, $validated, $program, $request): void {
             $grantBatch->update($this->batchAttributes($validated, $program, $request->user(), false));
@@ -170,6 +173,7 @@ class GrantDistributionController extends Controller
                 'semester' => $batch->semester,
                 'school_year' => $batch->school_year,
                 'venue' => $batch->venue,
+                'remarks' => $batch->remarks,
                 'total_beneficiaries' => $batch->beneficiaries->count(),
                 'created_by_name' => $request->user()?->name ?? 'Scholarship Officer',
             ],
@@ -197,6 +201,26 @@ class GrantDistributionController extends Controller
         return response()->json([
             'batch' => new GrantBatchResource($this->loadBatch($grantBatch)),
         ]);
+    }
+
+    /**
+     * Delete a batch before its claiming period starts.
+     */
+    public function destroy(Request $request, GrantBatch $grantBatch): Response
+    {
+        $this->assertCanManageBatch($request->user(), $grantBatch);
+
+        if (! $this->claimingHasNotStarted($grantBatch)) {
+            abort(422, 'Grant batches can only be deleted before the claiming day starts.');
+        }
+
+        if ($grantBatch->beneficiaries()->where('claim_status', 'Claimed')->exists()) {
+            abort(422, 'Grant batches with claimed beneficiaries cannot be deleted.');
+        }
+
+        $grantBatch->delete();
+
+        return response()->noContent();
     }
 
     /**
@@ -368,11 +392,16 @@ class GrantDistributionController extends Controller
                 'scholar_name' => $scholar->name,
                 'barangay' => $scholar->user?->barangay ?: $scholar->address ?: 'Not recorded',
                 'course' => $scholar->course ?: 'Not recorded',
-                'amount' => $grantBatch->amount,
-                'assigned_claim_date' => $grantBatch->status === 'Open' ? $schedule['date'] : null,
-                'time_slot' => $grantBatch->status === 'Open' ? $schedule['timeSlot'] : null,
-                'claim_status' => $claimStatus,
             ]);
+
+            if (! $isClaimed) {
+                $beneficiary->fill([
+                    'amount' => $grantBatch->amount,
+                    'assigned_claim_date' => $grantBatch->status === 'Open' ? $schedule['date'] : null,
+                    'time_slot' => $grantBatch->status === 'Open' ? $schedule['timeSlot'] : null,
+                    'claim_status' => $claimStatus,
+                ]);
+            }
 
             $beneficiary->save();
             $keptBeneficiaryIds[] = $beneficiary->id;
@@ -380,6 +409,7 @@ class GrantDistributionController extends Controller
 
         $grantBatch->beneficiaries()
             ->whereNotIn('id', $keptBeneficiaryIds)
+            ->where('claim_status', '!=', 'Claimed')
             ->delete();
     }
 
@@ -472,6 +502,54 @@ class GrantDistributionController extends Controller
                 'scholars' => ['Selected scholars must belong to the selected scholarship program.'],
             ]);
         }
+    }
+
+    /**
+     * Ensure selected scholars have not already claimed a grant for the same cycle.
+     *
+     * @param  array<int, array<string, mixed>>  $scholarRows
+     */
+    private function assertScholarsNotClaimedForCycle(
+        array $scholarRows,
+        int $programId,
+        string $semester,
+        string $schoolYear,
+        ?int $ignoreBatchId = null,
+    ): void {
+        $scholarIds = collect($scholarRows)
+            ->pluck('id')
+            ->map(static fn (mixed $scholarId): int => (int) $scholarId)
+            ->all();
+
+        $claimedScholarExists = GrantBeneficiary::query()
+            ->whereIn('scholar_id', $scholarIds)
+            ->where('claim_status', 'Claimed')
+            ->whereHas('batch', function (Builder $query) use ($programId, $semester, $schoolYear, $ignoreBatchId): void {
+                $query
+                    ->where('scholarship_program_id', $programId)
+                    ->where('semester', $semester)
+                    ->where('school_year', $schoolYear)
+                    ->when($ignoreBatchId, fn (Builder $batchQuery) => $batchQuery->whereKeyNot($ignoreBatchId));
+            })
+            ->exists();
+
+        if ($claimedScholarExists) {
+            throw ValidationException::withMessages([
+                'scholars' => ['Scholars who already claimed a grant for this cycle cannot be added to another batch.'],
+            ]);
+        }
+    }
+
+    /**
+     * Determine whether a batch is still before its claiming start day.
+     */
+    private function claimingHasNotStarted(GrantBatch $grantBatch): bool
+    {
+        if (! $grantBatch->claiming_start_date) {
+            return true;
+        }
+
+        return now()->startOfDay()->lt(Carbon::parse($grantBatch->claiming_start_date)->startOfDay());
     }
 
     /**

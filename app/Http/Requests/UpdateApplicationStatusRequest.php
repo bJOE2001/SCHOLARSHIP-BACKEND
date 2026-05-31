@@ -47,7 +47,19 @@ class UpdateApplicationStatusRequest extends FormRequest
                 'Renewed',
                 'Terminated',
             ])],
-            'remarks' => ['nullable', 'string'],
+            'remarks' => ['required_if:status,Rejected', 'nullable', 'string'],
+        ];
+    }
+
+    /**
+     * Get custom validation messages.
+     *
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'remarks.required_if' => 'Rejection remarks are required.',
         ];
     }
 }

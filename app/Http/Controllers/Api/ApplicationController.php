@@ -154,13 +154,14 @@ class ApplicationController extends Controller
         $validated = $request->validated();
         $currentUser = $request->user();
         $removedApplicationIds = [];
+        $remarks = $this->remarksForStatus($validated['status'], $validated['remarks'] ?? null);
 
         abort_unless($this->canAccessApplication($currentUser, $application), 403);
 
-        DB::transaction(function () use ($application, $currentUser, $validated, &$removedApplicationIds): void {
+        DB::transaction(function () use ($application, $currentUser, $validated, $remarks, &$removedApplicationIds): void {
             $application->fill([
                 'status' => $validated['status'],
-                'remarks' => $validated['remarks'] ?? $application->remarks,
+                'remarks' => $remarks,
                 'next_action' => $this->nextActionForStatus($validated['status']),
                 'progress' => $this->progressForStatus($validated['status']),
                 'score' => $this->scoreForStatus($validated['status'], (int) $application->score),
@@ -169,7 +170,7 @@ class ApplicationController extends Controller
                 'reviewed_at' => now(),
             ]);
 
-            $application->appendTimelineEvent($validated['status'], $validated['remarks'] ?? $application->remarks ?? 'Status updated.');
+            $application->appendTimelineEvent($validated['status'], $remarks);
             $application->save();
 
             $this->syncProgramUsage($application->program);
@@ -180,7 +181,7 @@ class ApplicationController extends Controller
             }
         });
 
-        $this->notifyApplicantOfStatus($application, $validated['remarks'] ?? null);
+        $this->notifyApplicantOfStatus($application, $remarks);
 
         return response()->json([
             'application' => new ScholarshipApplicationResource($application->load(['documents', 'applicant', 'program', 'reviewer'])),
@@ -765,6 +766,38 @@ class ApplicationController extends Controller
             'Renewed' => 'Keep the scholar under renewal monitoring.',
             'Terminated' => 'Close the case and archive the record.',
             default => 'Continue reviewing the application.',
+        };
+    }
+
+    /**
+     * Return action-specific remarks. Rejections keep the officer's required reason.
+     */
+    private function remarksForStatus(string $status, ?string $submittedRemarks): string
+    {
+        if ($status === 'Rejected') {
+            return trim((string) $submittedRemarks);
+        }
+
+        return match ($status) {
+            'Draft' => 'Draft application created.',
+            'Submitted' => 'Application submitted for review.',
+            'Resubmitted' => 'Application resubmitted for review.',
+            'Under Review' => 'Approved for application review.',
+            'Application Review Approved' => 'Application review approved. Continue to document validation.',
+            'For Revision', 'Needs Revision' => 'Requirements revision requested.',
+            'Eligible' => 'All application documents validated.',
+            'Shortlisted' => 'Applicant shortlisted for final decision.',
+            'Approved' => 'Approved for scholarship.',
+            'Accepted' => 'Scholarship award accepted.',
+            'Enrollment Verified' => 'Enrollment verified.',
+            'Active Scholar' => 'Scholarship record activated.',
+            'Pending Renewal', 'Renewal Pending' => 'Scholarship renewal pending.',
+            'Under Renewal Review' => 'Scholarship renewal under review.',
+            'Probation' => 'Scholar placed under probation.',
+            'Suspended' => 'Scholarship suspended.',
+            'Renewed' => 'Scholarship renewed.',
+            'Terminated' => 'Scholarship terminated.',
+            default => "Marked as {$status}.",
         };
     }
 

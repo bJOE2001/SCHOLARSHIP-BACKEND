@@ -83,16 +83,20 @@ class DocumentController extends Controller
     private function notifyApplicantOfDocumentStatus(
         ApplicationDocument $document,
         ScholarshipApplication $application,
-        ?string $remarks,
+        ?string $remarks
     ): void {
         $programName = $application->program?->name ?? 'your scholarship application';
         $isRevisionRequest = $document->status === 'Needs Revision';
         $title = $isRevisionRequest ? 'Document Revision Requested' : 'Document Status Updated';
-        $message = match ($document->status) {
-            'Needs Revision' => "Your {$document->name} document for {$programName} needs revision during Document Validation. Please upload a corrected file.",
-            'Rejected' => "Your {$document->name} document for {$programName} was rejected during Document Validation.",
-            default => "Your {$document->name} document for {$programName} is now {$document->status}.",
-        };
+        $message = "Your {$document->name} document for {$programName} is now {$document->status}.";
+
+        if ($document->status === 'Needs Revision') {
+            $message = "Your {$document->name} document for {$programName} needs revision during Document Validation. Please upload a corrected file.";
+        }
+
+        if ($document->status === 'Rejected') {
+            $message = "Your {$document->name} document for {$programName} was rejected during Document Validation.";
+        }
 
         if ($remarks !== null && trim($remarks) !== '') {
             $message .= ' Remarks: '.trim($remarks);

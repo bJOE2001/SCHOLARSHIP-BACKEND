@@ -88,9 +88,11 @@ class DocumentController extends Controller
         $programName = $application->program?->name ?? 'your scholarship application';
         $isRevisionRequest = $document->status === 'Needs Revision';
         $title = $isRevisionRequest ? 'Document Revision Requested' : 'Document Status Updated';
-        $message = $isRevisionRequest
-            ? "Your {$document->name} document for {$programName} needs revision. Please upload a corrected file."
-            : "Your {$document->name} document for {$programName} is now {$document->status}.";
+        $message = match ($document->status) {
+            'Needs Revision' => "Your {$document->name} document for {$programName} needs revision during Document Validation. Please upload a corrected file.",
+            'Rejected' => "Your {$document->name} document for {$programName} was rejected during Document Validation.",
+            default => "Your {$document->name} document for {$programName} is now {$document->status}.",
+        };
 
         if ($remarks !== null && trim($remarks) !== '') {
             $message .= ' Remarks: '.trim($remarks);

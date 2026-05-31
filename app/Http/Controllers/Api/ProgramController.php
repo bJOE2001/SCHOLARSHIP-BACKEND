@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreProgramRequest;
 use App\Http\Requests\UpdateProgramRequest;
 use App\Http\Resources\ScholarshipProgramResource;
+use App\Models\ArchivedScholarshipProgram;
 use App\Models\ScholarshipProgram;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,7 +25,7 @@ class ProgramController extends Controller
 
         $programs = ScholarshipProgram::query()
             ->with('assignedOfficers:id')
-            ->when($publishedOnly || $currentUser === null, function ($query): void {
+            ->when($publishedOnly || $currentUser === null || $currentUser?->isStudent(), function ($query): void {
                 $query->whereIn('status', ['Open', 'Closing Soon']);
             })
             ->when($currentUser?->isOfficer() && ! $currentUser?->isSuperAdmin(), function ($query) use ($currentUser): void {
@@ -97,6 +98,10 @@ class ProgramController extends Controller
 
         $program->save();
         $this->syncAssignedOfficers($program, $this->assignedOfficerIdsFromPayload($validated));
+
+        if ($program->status === 'Archived') {
+            $this->archiveProgramSnapshot($program->fresh(['assignedOfficers']), $request);
+        }
 
         return response()->json([
             'program' => new ScholarshipProgramResource($program),
@@ -258,6 +263,39 @@ class ProgramController extends Controller
 
         $program->assignedOfficers()->sync($this->normalizeUserIds($userIds));
         $program->unsetRelation('assignedOfficers');
+    }
+
+    /**
+     * Save a durable archived copy of a scholarship program.
+     */
+    private function archiveProgramSnapshot(ScholarshipProgram $program, Request $request): void
+    {
+        ArchivedScholarshipProgram::updateOrCreate(
+            ['original_scholarship_program_id' => $program->id],
+            [
+                'archived_by_id' => $request->user()?->id,
+                'name' => $program->name,
+                'provider' => $program->provider,
+                'category' => $program->category,
+                'type' => $program->type,
+                'description' => $program->description,
+                'eligibility_summary' => $program->eligibility_summary,
+                'status' => 'Archived',
+                'slots' => $program->slots,
+                'used_slots' => $program->used_slots,
+                'budget' => $program->budget,
+                'maintaining_grade' => $program->maintaining_grade,
+                'schedule' => $program->schedule,
+                'eligibility' => $program->eligibility,
+                'requirements' => $program->requirements,
+                'requirement_rules' => $program->requirement_rules,
+                'scoring_criteria' => $program->scoring_criteria,
+                'renewal_rules' => $program->renewal_rules,
+                'assigned_officer_ids' => $program->assignedOfficers->pluck('id')->map(fn (mixed $id): int => (int) $id)->values()->all(),
+                'published_at' => $program->published_at,
+                'archived_at' => now(),
+            ],
+        );
     }
 
     /**

@@ -174,19 +174,34 @@ class GrantDistributionApiTest extends TestCase
         ]);
     }
 
-    public function test_batch_can_only_be_deleted_before_claiming_day_starts(): void
+    public function test_closed_batch_is_archived_and_archived_claims_block_duplicate_cycle_batches(): void
     {
-        Carbon::setTestNow('2026-05-24 08:00:00');
+        Carbon::setTestNow('2026-05-25 08:00:00');
 
         $headOfficer = User::factory()->headOfficer()->create();
         $program = ScholarshipProgram::factory()->published()->create();
-        $scholar = $this->createScholar($program, 'Delete Scholar');
+        $claimedScholar = $this->createScholar($program, 'Archived Claimed Scholar');
+        $unclaimedScholar = $this->createScholar($program, 'Archived Unclaimed Scholar');
 
         Sanctum::actingAs($headOfficer);
 
-        $batchId = $this->postJson('/api/grant-distribution/batches', $this->batchPayload($program, [
-            ['id' => $scholar->id],
-        ]))->assertCreated()->json('batch.id');
+        $batchResponse = $this->postJson('/api/grant-distribution/batches', $this->batchPayload($program, [
+            ['id' => $claimedScholar->id],
+            ['id' => $unclaimedScholar->id],
+        ]))->assertCreated();
+        $batchId = $batchResponse->json('batch.id');
+        $claimedBeneficiaryId = $batchResponse->json('batch.beneficiaries.0.id');
+
+        $this->deleteJson("/api/grant-distribution/batches/{$batchId}")
+            ->assertUnprocessable();
+
+        $this->postJson("/api/grant-distribution/batches/{$batchId}/beneficiaries/{$claimedBeneficiaryId}/release", [
+            'referenceNumber' => 'REL-2026-ARCHIVE',
+            'claimMethod' => 'Cash',
+        ])->assertOk();
+
+        $this->patchJson("/api/grant-distribution/batches/{$batchId}/close")
+            ->assertOk();
 
         $this->deleteJson("/api/grant-distribution/batches/{$batchId}")
             ->assertNoContent();
@@ -194,19 +209,19 @@ class GrantDistributionApiTest extends TestCase
         $this->assertDatabaseMissing('grant_batches', [
             'id' => $batchId,
         ]);
-
-        Carbon::setTestNow('2026-05-25 08:00:00');
-
-        $blockedBatchId = $this->postJson('/api/grant-distribution/batches', $this->batchPayload($program, [
-            ['id' => $scholar->id],
-        ]))->assertCreated()->json('batch.id');
-
-        $this->deleteJson("/api/grant-distribution/batches/{$blockedBatchId}")
-            ->assertUnprocessable();
-
-        $this->assertDatabaseHas('grant_batches', [
-            'id' => $blockedBatchId,
+        $this->assertDatabaseHas('archived_grant_batches', [
+            'original_grant_batch_id' => $batchId,
+            'scholarship_program_id' => $program->id,
+            'status' => 'Archived',
         ]);
+
+        $this->postJson('/api/grant-distribution/batches', $this->batchPayload($program, [
+            ['id' => $claimedScholar->id],
+        ]))->assertUnprocessable();
+
+        $this->postJson('/api/grant-distribution/batches', $this->batchPayload($program, [
+            ['id' => $unclaimedScholar->id],
+        ]))->assertCreated();
 
         Carbon::setTestNow();
     }

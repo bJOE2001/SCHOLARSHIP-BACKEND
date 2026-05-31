@@ -790,7 +790,10 @@ class ApplicationController extends Controller
     {
         $application->loadMissing('program');
         $programName = $application->program?->name ?? 'your scholarship';
-        $message = "Your application for {$programName} is now {$application->status}.";
+        $stage = $application->status === 'Rejected' ? $this->rejectionStageForApplication($application) : null;
+        $message = $stage !== null
+            ? "Your application for {$programName} was rejected during {$stage}."
+            : "Your application for {$programName} is now {$application->status}.";
 
         if ($remarks !== null && trim($remarks) !== '') {
             $message .= ' Remarks: '.trim($remarks);
@@ -867,6 +870,26 @@ class ApplicationController extends Controller
             'For Revision', 'Needs Revision', 'Renewal Pending' => 'task',
             'Rejected', 'Terminated' => 'warning',
             default => 'status',
+        };
+    }
+
+    /**
+     * Infer the review stage where an application rejection happened.
+     */
+    private function rejectionStageForApplication(ScholarshipApplication $application): ?string
+    {
+        $previousStatus = collect($application->timeline ?? [])
+            ->reverse()
+            ->pluck('status')
+            ->first(fn (?string $status): bool => $status !== null && ! in_array($status, ['Rejected', 'Ineligible', 'Terminated'], true));
+
+        return match ($previousStatus) {
+            'Submitted', 'Resubmitted', 'For Revision', 'Needs Revision' => 'Application Management',
+            'Under Review' => 'Application Review',
+            'Application Review Approved' => 'Document Validation',
+            'Eligible' => 'Applicant Ranking',
+            'Shortlisted' => 'Final Decision',
+            default => null,
         };
     }
 }

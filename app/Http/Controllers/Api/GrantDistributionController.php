@@ -10,6 +10,7 @@ use App\Http\Requests\UpdateGrantBatchRequest;
 use App\Http\Resources\GrantAnnouncementResource;
 use App\Http\Resources\GrantBatchResource;
 use App\Http\Resources\GrantBeneficiaryResource;
+use App\Models\ArchivedGrantBatch;
 use App\Models\GrantAnnouncement;
 use App\Models\GrantBatch;
 use App\Models\GrantBeneficiary;
@@ -48,8 +49,14 @@ class GrantDistributionController extends Controller
             ->latest('updated_at')
             ->get();
 
+        $archivedBatches = $this->visibleArchivedBatchQuery($currentUser)
+            ->with('program')
+            ->latest('archived_at')
+            ->get();
+
         return response()->json([
             'batches' => GrantBatchResource::collection($batches),
+            'archivedBatches' => $archivedBatches->map(fn (ArchivedGrantBatch $batch): array => $this->archivedBatchPayload($batch))->values(),
             'announcements' => GrantAnnouncementResource::collection($announcements),
         ]);
     }
@@ -204,21 +211,43 @@ class GrantDistributionController extends Controller
     }
 
     /**
-     * Delete a batch before its claiming period starts.
+     * Archive a closed batch and remove it from the active batch list.
      */
     public function destroy(Request $request, GrantBatch $grantBatch): Response
     {
         $this->assertCanManageBatch($request->user(), $grantBatch);
 
-        if (! $this->claimingHasNotStarted($grantBatch)) {
-            abort(422, 'Grant batches can only be deleted before the claiming day starts.');
+        if ($grantBatch->status !== 'Closed') {
+            abort(422, 'Only closed grant batches can be archived.');
         }
 
-        if ($grantBatch->beneficiaries()->where('claim_status', 'Claimed')->exists()) {
-            abort(422, 'Grant batches with claimed beneficiaries cannot be deleted.');
-        }
+        DB::transaction(function () use ($request, $grantBatch): void {
+            $batch = $this->loadBatch($grantBatch);
 
-        $grantBatch->delete();
+            ArchivedGrantBatch::create([
+                'original_grant_batch_id' => $batch->id,
+                'scholarship_program_id' => $batch->scholarship_program_id,
+                'created_by_id' => $batch->created_by_id,
+                'archived_by_id' => $request->user()?->id,
+                'title' => $batch->title,
+                'semester' => $batch->semester,
+                'school_year' => $batch->school_year,
+                'amount' => $batch->amount,
+                'claiming_start_date' => $batch->claiming_start_date,
+                'claiming_end_date' => $batch->claiming_end_date,
+                'venue' => $batch->venue,
+                'daily_limit' => $batch->daily_limit,
+                'remarks' => $batch->remarks,
+                'status' => 'Archived',
+                'beneficiaries' => $batch->beneficiaries
+                    ->map(fn (GrantBeneficiary $beneficiary): array => $this->archivedBeneficiaryPayload($beneficiary, $batch))
+                    ->values()
+                    ->all(),
+                'archived_at' => now(),
+            ]);
+
+            $batch->delete();
+        });
 
         return response()->noContent();
     }
@@ -265,6 +294,25 @@ class GrantDistributionController extends Controller
         return GrantBatch::query()
             ->when($currentUser->isStudent(), function (Builder $query) use ($currentUser): void {
                 $query->whereHas('beneficiaries', fn (Builder $beneficiaryQuery) => $beneficiaryQuery->where('user_id', $currentUser->id));
+            })
+            ->when($currentUser->isOfficer() && ! $currentUser->isSuperAdmin(), function (Builder $query) use ($currentUser): void {
+                $programIds = $this->assignedProgramIds($currentUser);
+
+                $programIds === []
+                    ? $query->whereRaw('1 = 0')
+                    : $query->whereIn('scholarship_program_id', $programIds);
+            })
+            ->when(! $currentUser->isStudent() && ! $currentUser->isOfficer(), fn (Builder $query) => $query->whereRaw('1 = 0'));
+    }
+
+    /**
+     * Return archived grant batches visible to one user.
+     */
+    private function visibleArchivedBatchQuery(User $currentUser): Builder
+    {
+        return ArchivedGrantBatch::query()
+            ->when($currentUser->isStudent(), function (Builder $query) use ($currentUser): void {
+                $query->whereJsonContains('beneficiaries', [['userId' => $currentUser->id]]);
             })
             ->when($currentUser->isOfficer() && ! $currentUser->isSuperAdmin(), function (Builder $query) use ($currentUser): void {
                 $programIds = $this->assignedProgramIds($currentUser);
@@ -533,7 +581,18 @@ class GrantDistributionController extends Controller
             })
             ->exists();
 
-        if ($claimedScholarExists) {
+        $archivedClaimedScholarExists = ArchivedGrantBatch::query()
+            ->where('scholarship_program_id', $programId)
+            ->where('semester', $semester)
+            ->where('school_year', $schoolYear)
+            ->get()
+            ->flatMap(fn (ArchivedGrantBatch $batch): array => $batch->beneficiaries ?? [])
+            ->contains(function (array $beneficiary) use ($scholarIds): bool {
+                return ($beneficiary['claimStatus'] ?? null) === 'Claimed'
+                    && in_array((int) ($beneficiary['scholarRecordId'] ?? 0), $scholarIds, true);
+            });
+
+        if ($claimedScholarExists || $archivedClaimedScholarExists) {
             throw ValidationException::withMessages([
                 'scholars' => ['Scholars who already claimed a grant for this cycle cannot be added to another batch.'],
             ]);
@@ -541,15 +600,75 @@ class GrantDistributionController extends Controller
     }
 
     /**
-     * Determine whether a batch is still before its claiming start day.
+     * Build the frontend payload for one archived batch.
+     *
+     * @return array<string, mixed>
      */
-    private function claimingHasNotStarted(GrantBatch $grantBatch): bool
+    private function archivedBatchPayload(ArchivedGrantBatch $batch): array
     {
-        if (! $grantBatch->claiming_start_date) {
-            return true;
-        }
+        return [
+            'id' => 'archived-'.$batch->id,
+            'archiveId' => $batch->id,
+            'originalBatchId' => $batch->original_grant_batch_id,
+            'title' => $batch->title,
+            'programId' => $batch->scholarship_program_id,
+            'programName' => $batch->program?->name ?? 'Scholarship Program',
+            'semester' => $batch->semester,
+            'schoolYear' => $batch->school_year,
+            'amount' => $batch->amount,
+            'claimingStartDate' => $batch->claiming_start_date?->toDateString(),
+            'claimingEndDate' => $batch->claiming_end_date?->toDateString(),
+            'venue' => $batch->venue,
+            'dailyLimit' => $batch->daily_limit,
+            'remarks' => $batch->remarks,
+            'status' => $batch->status,
+            'archived' => true,
+            'beneficiaries' => $batch->beneficiaries ?? [],
+            'archivedAt' => $batch->archived_at?->toISOString(),
+            'createdAt' => $batch->created_at?->toISOString(),
+            'updatedAt' => $batch->updated_at?->toISOString(),
+        ];
+    }
 
-        return now()->startOfDay()->lt(Carbon::parse($grantBatch->claiming_start_date)->startOfDay());
+    /**
+     * Build a durable beneficiary snapshot before archiving a batch.
+     *
+     * @return array<string, mixed>
+     */
+    private function archivedBeneficiaryPayload(GrantBeneficiary $beneficiary, GrantBatch $batch): array
+    {
+        return [
+            'id' => 'archived-'.$beneficiary->id,
+            'originalBeneficiaryId' => $beneficiary->id,
+            'batchId' => 'archived-'.$batch->id,
+            'originalBatchId' => $batch->id,
+            'batchTitle' => $batch->title,
+            'scholarRecordId' => $beneficiary->scholar_id,
+            'scholarId' => $beneficiary->scholar_identifier,
+            'userId' => $beneficiary->user_id,
+            'scholarName' => $beneficiary->scholar_name,
+            'barangay' => $beneficiary->barangay,
+            'course' => $beneficiary->course,
+            'programId' => $batch->scholarship_program_id,
+            'programName' => $batch->program?->name ?? 'Scholarship Program',
+            'semester' => $batch->semester,
+            'schoolYear' => $batch->school_year,
+            'venue' => $batch->venue,
+            'amount' => $beneficiary->amount,
+            'assignedClaimDate' => $beneficiary->assigned_claim_date?->toDateString(),
+            'timeSlot' => $beneficiary->time_slot,
+            'claimStatus' => $beneficiary->claim_status,
+            'notifiedAt' => $beneficiary->notified_at?->toISOString(),
+            'claimedAt' => $beneficiary->claimed_at?->toISOString(),
+            'releasedBy' => $beneficiary->released_by_name,
+            'referenceNumber' => $beneficiary->reference_number,
+            'qrCode' => $beneficiary->reference_number,
+            'claimMethod' => $beneficiary->claim_method,
+            'releaseRemarks' => $beneficiary->release_remarks,
+            'archived' => true,
+            'createdAt' => $beneficiary->created_at?->toISOString(),
+            'updatedAt' => $beneficiary->updated_at?->toISOString(),
+        ];
     }
 
     /**

@@ -106,4 +106,3 @@ class Scholar extends Model
         return $this->hasMany(ScholarComplianceSubmission::class);
     }
 }
-

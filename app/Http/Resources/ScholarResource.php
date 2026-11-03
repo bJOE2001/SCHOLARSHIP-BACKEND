@@ -123,10 +123,11 @@ class ScholarResource extends JsonResource
             'updatedAt' => $submission->updated_at?->toISOString(),
         ];
     }
+
     /**
      * Find a saved semester submission entry by stable key.
      *
-     * @param array<int, array<string, mixed>> $submissions
+     * @param  array<int, array<string, mixed>>  $submissions
      * @return array<string, mixed>
      */
     private function submissionFor(array $submissions, string $key): array
@@ -149,7 +150,7 @@ class ScholarResource extends JsonResource
     /**
      * Return the saved status for one semester requirement.
      *
-     * @param array<int, array<string, mixed>> $submissions
+     * @param  array<int, array<string, mixed>>  $submissions
      */
     private function submissionStatus(array $submissions, string $key): ?string
     {
@@ -159,8 +160,8 @@ class ScholarResource extends JsonResource
     /**
      * Prefer the scholar's reset semester requirement payload when it is newer.
      *
-     * @param array<int, array<string, mixed>> $scholarSubmissions
-     * @param array<int, array<string, mixed>> $latestSubmissionRows
+     * @param  array<int, array<string, mixed>>  $scholarSubmissions
+     * @param  array<int, array<string, mixed>>  $latestSubmissionRows
      */
     private function shouldUseScholarSubmissions(array $scholarSubmissions, array $latestSubmissionRows): bool
     {
@@ -176,7 +177,7 @@ class ScholarResource extends JsonResource
     }
 
     /**
-     * @param array<int, array<string, mixed>> $submissions
+     * @param  array<int, array<string, mixed>>  $submissions
      */
     private function hasSemesterRequirementRequest(array $submissions): bool
     {
@@ -184,7 +185,7 @@ class ScholarResource extends JsonResource
     }
 
     /**
-     * @param array<int, array<string, mixed>> $submissions
+     * @param  array<int, array<string, mixed>>  $submissions
      */
     private function latestSemesterRequirementRequestedAt(array $submissions): ?string
     {

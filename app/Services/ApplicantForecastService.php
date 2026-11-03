@@ -9,6 +9,8 @@ use Illuminate\Support\Collection;
 
 class ApplicantForecastService
 {
+    public function __construct(private readonly RandomForestForecastService $randomForestForecastService) {}
+
     /**
      * Build applicant forecasts for all visible programs or one selected program.
      *
@@ -25,7 +27,7 @@ class ApplicantForecastService
 
         $programIds = $this->programIds($visibleProgramIds, $programId);
         $programs = ScholarshipProgram::query()
-            ->select(['id', 'name'])
+            ->select(['id', 'name', 'slots'])
             ->when($programIds !== null, fn ($query) => $query->whereIn('id', $programIds))
             ->orderBy('name')
             ->get();
@@ -34,6 +36,35 @@ class ApplicantForecastService
         $programForecasts = $programs
             ->map(fn (ScholarshipProgram $program): array => $this->forecastForScope($applications, $program, $months))
             ->values();
+
+        $mlPayload = [
+            'lookbackMonths' => $lookbackMonths,
+            'currentDay' => now()->day,
+            'daysInMonth' => now()->daysInMonth,
+            'summary' => [
+                'programName' => $summary['programName'] ?? 'All Programs',
+                'slots' => (int) $programs->sum('slots'),
+                'history' => $summary['history'],
+            ],
+            'programs' => $programForecasts->map(fn (array $progForecast): array => [
+                'programId' => $progForecast['programId'],
+                'programName' => $progForecast['programName'],
+                'slots' => (int) ($programs->firstWhere('id', $progForecast['programId'])?->slots ?? 50),
+                'history' => $progForecast['history'],
+            ])->all(),
+        ];
+
+        $mlResult = $this->randomForestForecastService->forecast($mlPayload);
+
+        if ($mlResult !== null && ($mlResult['status'] ?? '') === 'success') {
+            return [
+                'generatedAt' => now()->toISOString(),
+                'method' => $mlResult['method'] ?? 'Random Forest Regressor (lag & pace ensemble)',
+                'lookbackMonths' => $lookbackMonths,
+                'summary' => $mlResult['summary'],
+                'programs' => $mlResult['programs'],
+            ];
+        }
 
         return [
             'generatedAt' => now()->toISOString(),
@@ -128,6 +159,7 @@ class ApplicantForecastService
             'averageMonthlyApplicants' => round($historicalAverage, 1),
             'trendDelta' => $predictedApplicantsThisMonth - $previousMonthApplicants,
             'confidence' => $this->confidence($completeMonthCounts),
+            'featureImportances' => [],
             'history' => $history->all(),
         ];
     }

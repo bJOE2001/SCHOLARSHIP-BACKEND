@@ -17,8 +17,8 @@ class ScholarshipProgramSeeder extends Seeder
         $tdpOfficer = User::query()->where('email', 'tdp.officer@example.com')->firstOrFail();
         $meritOfficer = User::query()->where('email', 'merit.officer@example.com')->firstOrFail();
         $programs = [
-            ['code' => 'TDP', 'name' => 'Tulong Dunong Program', 'category' => 'Government Assistance', 'type' => 'Grant', 'slots' => 100, 'budget' => 3000000],
-            ['code' => 'MERIT', 'name' => 'Merit Scholars Grant', 'category' => 'Academic Merit', 'type' => 'Scholarship', 'slots' => 45, 'budget' => 1800000],
+            ['code' => 'TDP', 'name' => 'Tulong Dunong Program', 'category' => 'Government Assistance', 'type' => 'Grant', 'slots' => 100, 'budget' => 3000000, 'maintaining_grade' => 83.0],
+            ['code' => 'MERIT', 'name' => 'Merit Scholars Grant', 'category' => 'Academic Merit', 'type' => 'Scholarship', 'slots' => 45, 'budget' => 1800000, 'maintaining_grade' => 85.0],
         ];
         $programOfficers = [
             'TDP' => $tdpOfficer,
@@ -39,6 +39,7 @@ class ScholarshipProgramSeeder extends Seeder
                 'slots' => $program['slots'],
                 'used_slots' => 0,
                 'budget' => $program['budget'],
+                'maintaining_grade' => $program['maintaining_grade'] ?? null,
                 'schedule' => [
                     'opening' => 'May 01, 2026',
                     'deadline' => 'June 15, 2026',

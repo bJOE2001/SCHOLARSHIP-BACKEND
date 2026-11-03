@@ -35,4 +35,14 @@ return [
         ],
     ],
 
+    'forecasting' => [
+        'enabled' => (bool) env('FORECASTING_ML_ENABLED', true),
+        'driver' => env('FORECASTING_DRIVER', 'auto'),
+        'python_path' => env('FORECASTING_PYTHON_PATH', 'python'),
+        'script_path' => env('FORECASTING_SCRIPT_PATH', base_path('../SCHOLARSHIP-FORECASTING/forecast_service.py')),
+        'risk_script_path' => env('FORECASTING_RISK_SCRIPT_PATH', base_path('../SCHOLARSHIP-FORECASTING/risk_service.py')),
+        'service_url' => env('FORECASTING_SERVICE_URL', 'http://127.0.0.1:8001'),
+        'timeout_seconds' => (int) env('FORECASTING_TIMEOUT_SECONDS', 5),
+    ],
+
 ];

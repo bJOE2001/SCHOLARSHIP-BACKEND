@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Scholar;
 use App\Models\ScholarshipApplication;
 use App\Models\ScholarshipProgram;
+use App\Services\ScholarRiskService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -12,12 +14,18 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportController extends Controller
 {
+    public function __construct(private readonly ScholarRiskService $scholarRiskService) {}
+
     /**
      * Export report rows as CSV or a lightweight generated PDF.
      */
     public function export(Request $request): StreamedResponse|Response
     {
         abort_unless($request->user()?->isOfficer(), 403);
+
+        if ($request->query('report') === 'risk' || $request->query('category') === 'risk') {
+            return $this->exportRiskReport($request);
+        }
 
         $validated = $request->validate([
             'type' => ['nullable', 'string', 'in:CSV,PDF,csv,pdf'],
@@ -107,6 +115,59 @@ class ReportController extends Controller
         }
 
         return [];
+    }
+
+    private function exportRiskReport(Request $request): StreamedResponse
+    {
+        $programIds = $this->visibleProgramIds($request);
+        $maintainingGrades = ScholarshipProgram::query()
+            ->whereNotNull('maintaining_grade')
+            ->when($programIds !== null, fn (Builder $query) => $query->whereIn('id', $programIds))
+            ->pluck('maintaining_grade', 'id')
+            ->map(fn (mixed $grade): float => (float) $grade);
+
+        $scholars = Scholar::query()
+            ->when($programIds !== null, fn (Builder $query) => $query->whereIn('scholarship_program_id', $programIds))
+            ->whereIn('scholarship_program_id', $maintainingGrades->keys())
+            ->orderBy('name')
+            ->get();
+
+        $evaluated = $this->scholarRiskService->evaluateBatch($scholars, $maintainingGrades);
+
+        return response()->streamDownload(function () use ($evaluated): void {
+            $output = fopen('php://output', 'w');
+            fputcsv($output, [
+                'Scholar ID',
+                'Name',
+                'Program',
+                'GPA',
+                'Maintaining Grade',
+                'Grade Margin',
+                'Risk Status',
+                'Decision Tree Rule',
+                'Risk Reason',
+                'Recommended Intervention',
+            ]);
+
+            foreach ($evaluated as $row) {
+                fputcsv($output, [
+                    $row['scholarId'],
+                    $row['name'],
+                    $row['program'],
+                    $row['gpa'],
+                    $row['maintainingGrade'],
+                    $row['gradeMargin'],
+                    $row['riskLabel'],
+                    $row['decisionRule'] ?? 'N/A',
+                    $row['riskReason'],
+                    $row['recommendedAction'],
+                ]);
+            }
+
+            fclose($output);
+        }, 'scholar-risk-assessment-report.csv', [
+            'Content-Type' => 'text/csv',
+        ]);
     }
 
     /**

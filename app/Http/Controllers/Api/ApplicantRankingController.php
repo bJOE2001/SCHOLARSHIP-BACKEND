@@ -4,12 +4,15 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ScholarshipApplication;
+use App\Services\ApplicantRankingService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class ApplicantRankingController extends Controller
 {
+    public function __construct(private readonly ApplicantRankingService $applicantRankingService) {}
+
     /**
      * Return backend-ranked applicant rows.
      */
@@ -28,6 +31,8 @@ class ApplicantRankingController extends Controller
 
         $rows = $applications
             ->map(function (ScholarshipApplication $application, int $index): array {
+                $rankingScore = $this->applicantRankingService->scoreApplication($application);
+
                 return [
                     'id' => $application->id,
                     'rank' => $index + 1,
@@ -39,6 +44,11 @@ class ApplicantRankingController extends Controller
                     'programName' => $application->program?->name ?? 'Unknown program',
                     'gpa' => $application->applicant?->gpa ?? 'Pending',
                     'score' => $this->scoreForStatus($application->status, (int) $application->score),
+                    'compositeScore' => $rankingScore['compositeScore'],
+                    'meritScore' => $rankingScore['meritScore'],
+                    'needScore' => $rankingScore['needScore'],
+                    'completenessScore' => $rankingScore['completenessScore'],
+                    'priorityCategory' => $rankingScore['priorityCategory'],
                     'status' => $application->status,
                     'eligibility' => $this->eligibilityForApplication($application),
                     'recommendation' => $this->recommendationForStatus($application->status),

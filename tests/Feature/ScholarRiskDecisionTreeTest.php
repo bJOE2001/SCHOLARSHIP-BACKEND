@@ -54,10 +54,16 @@ class ScholarRiskDecisionTreeTest extends TestCase
 
         Sanctum::actingAs($officer);
 
-        // 1. ML Enabled (Decision Tree)
+        // 1. ML Enabled (Decision Tree via Process)
+        config(['services.forecasting.driver' => 'process']);
         $response = $this->getJson('/api/risk-detection')
             ->assertOk()
+            ->assertJsonPath('available', true)
+            ->assertJsonPath('status', 'online')
             ->assertJsonStructure([
+                'available',
+                'status',
+                'method',
                 'riskRows' => [
                     '*' => [
                         'id',
@@ -95,13 +101,14 @@ class ScholarRiskDecisionTreeTest extends TestCase
         $this->assertNotNull($stableRow);
         $this->assertEquals('Stable', $stableRow['riskLabel']);
 
-        // 2. ML Disabled - Fallback Driver Check
+        // 2. ML Disabled - Strict Offline Behavior
         config(['services.forecasting.enabled' => false]);
 
-        $fallbackResponse = $this->getJson('/api/risk-detection')->assertOk();
-        $fallbackRows = collect($fallbackResponse->json('riskRows'));
-        $fallbackAtRisk = $fallbackRows->firstWhere('name', 'Failing Student');
-        $this->assertEquals('At Risk', $fallbackAtRisk['riskLabel']);
-        $this->assertEquals('Heuristic Grade Rule', $fallbackAtRisk['modelMethod']);
+        $offlineResponse = $this->getJson('/api/risk-detection')
+            ->assertOk()
+            ->assertJsonPath('available', false)
+            ->assertJsonPath('status', 'offline')
+            ->assertJsonPath('method', 'ML Service Offline')
+            ->assertJsonCount(0, 'riskRows');
     }
 }

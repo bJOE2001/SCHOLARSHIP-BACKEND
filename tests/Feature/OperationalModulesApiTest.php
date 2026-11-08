@@ -165,6 +165,8 @@ class OperationalModulesApiTest extends TestCase
             ->assertJsonPath('rankings.0.rank', 1)
             ->assertJsonPath('rankings.0.programName', 'Merit Program');
 
+        config(['services.forecasting.driver' => 'process']);
+
         $this->getJson('/api/risk-detection')
             ->assertOk()
             ->assertJsonPath('riskRows.0.name', 'Ranked Student')

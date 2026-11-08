@@ -36,27 +36,9 @@ class RiskDetectionController extends Controller
             ->orderBy('name')
             ->get();
 
-        $riskRows = $this->scholarRiskService->evaluateBatch($scholars, $maintainingGrades);
+        $riskEvaluation = $this->scholarRiskService->evaluate($scholars, $maintainingGrades);
 
-        $riskSummary = collect(['Stable', 'Borderline', 'At Risk'])
-            ->map(fn (string $label): array => [
-                'label' => $label,
-                'count' => collect($riskRows)->where('riskLabel', $label)->count(),
-            ])
-            ->all();
-        $totalScholars = max(count($riskRows), 1);
-        $forecasts = collect($riskSummary)
-            ->map(fn (array $item): array => [
-                'label' => $item['label'],
-                'value' => (int) round(($item['count'] / $totalScholars) * 100),
-            ])
-            ->all();
-
-        return response()->json([
-            'riskRows' => $riskRows,
-            'riskSummary' => $riskSummary,
-            'forecasts' => $forecasts,
-        ]);
+        return response()->json($riskEvaluation);
     }
 
     /**

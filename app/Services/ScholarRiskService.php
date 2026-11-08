@@ -12,7 +12,7 @@ use Throwable;
 class ScholarRiskService
 {
     /**
-     * Evaluate scholar risk using the Decision Tree classifier with graceful fallback.
+     * Evaluate scholar risk for reports or legacy callers.
      *
      * @param  Collection<int, Scholar>  $scholars
      * @param  Collection<int, float>  $maintainingGrades
@@ -20,8 +20,27 @@ class ScholarRiskService
      */
     public function evaluateBatch(Collection $scholars, Collection $maintainingGrades): array
     {
+        return $this->evaluate($scholars, $maintainingGrades)['riskRows'];
+    }
+
+    /**
+     * Evaluate scholar risk using the Decision Tree classifier strictly requiring the ML service.
+     *
+     * @param  Collection<int, Scholar>  $scholars
+     * @param  Collection<int, float>  $maintainingGrades
+     * @return array<string, mixed>
+     */
+    public function evaluate(Collection $scholars, Collection $maintainingGrades): array
+    {
         if ($scholars->isEmpty()) {
-            return [];
+            return [
+                'available' => true,
+                'status' => 'online',
+                'method' => 'Decision Tree Classifier',
+                'riskRows' => [],
+                'riskSummary' => [],
+                'forecasts' => [],
+            ];
         }
 
         $scholarsPayload = $scholars->map(fn (Scholar $scholar): array => [
@@ -37,36 +56,34 @@ class ScholarRiskService
         ])->values()->all();
 
         $mlResults = $this->runMlEvaluation($scholarsPayload);
+
+        if ($mlResults === null || ($mlResults['status'] ?? '') !== 'success') {
+            return [
+                'available' => false,
+                'status' => 'offline',
+                'message' => 'ML Risk Detection service is offline. Risk evaluation strictly relies on the Machine Learning Decision Tree microservice.',
+                'method' => 'ML Service Offline',
+                'riskRows' => [],
+                'riskSummary' => [
+                    ['label' => 'Stable', 'count' => 0],
+                    ['label' => 'Borderline', 'count' => 0],
+                    ['label' => 'At Risk', 'count' => 0],
+                ],
+                'forecasts' => [
+                    ['label' => 'Stable', 'value' => 0],
+                    ['label' => 'Borderline', 'value' => 0],
+                    ['label' => 'At Risk', 'value' => 0],
+                ],
+            ];
+        }
+
         $resultsById = collect($mlResults['results'] ?? [])->keyBy('id');
 
-        return $scholars->map(function (Scholar $scholar) use ($maintainingGrades, $resultsById): array {
+        $riskRows = $scholars->map(function (Scholar $scholar) use ($maintainingGrades, $resultsById): array {
             $maintainingGrade = (float) ($maintainingGrades->get($scholar->scholarship_program_id) ?? 85.0);
             $mlEvaluation = $resultsById->get($scholar->id);
 
-            if ($mlEvaluation !== null) {
-                $riskLabel = (string) ($mlEvaluation['riskLabel'] ?? $this->fallbackRiskLabel($scholar, $maintainingGrade));
-
-                return [
-                    'id' => $scholar->id,
-                    'scholarId' => $scholar->scholar_id,
-                    'userId' => $scholar->user_id,
-                    'programId' => $scholar->scholarship_program_id,
-                    'name' => $scholar->name,
-                    'program' => $scholar->program,
-                    'gpa' => $scholar->gpa,
-                    'maintainingGrade' => $maintainingGrade,
-                    'riskLabel' => $riskLabel,
-                    'gradeMargin' => $mlEvaluation['gradeMargin'] ?? round(((float) $scholar->gpa) - $maintainingGrade, 2),
-                    'decisionRule' => $mlEvaluation['decisionRule'] ?? null,
-                    'probabilities' => $mlEvaluation['probabilities'] ?? null,
-                    'riskReason' => $mlEvaluation['riskReason'] ?? $this->fallbackRiskReason($scholar, $riskLabel, $maintainingGrade),
-                    'recommendedAction' => $scholar->recommended_action ?: ($mlEvaluation['recommendedAction'] ?? $this->fallbackRecommendedAction($riskLabel)),
-                    'modelMethod' => 'Decision Tree Classifier',
-                    'updatedAt' => $scholar->updated_at?->toISOString(),
-                ];
-            }
-
-            $fallbackLabel = $this->fallbackRiskLabel($scholar, $maintainingGrade);
+            $riskLabel = (string) ($mlEvaluation['riskLabel'] ?? 'At Risk');
 
             return [
                 'id' => $scholar->id,
@@ -77,20 +94,44 @@ class ScholarRiskService
                 'program' => $scholar->program,
                 'gpa' => $scholar->gpa,
                 'maintainingGrade' => $maintainingGrade,
-                'riskLabel' => $fallbackLabel,
-                'gradeMargin' => round(((float) $scholar->gpa) - $maintainingGrade, 2),
-                'decisionRule' => null,
-                'probabilities' => null,
-                'riskReason' => $this->fallbackRiskReason($scholar, $fallbackLabel, $maintainingGrade),
-                'recommendedAction' => $scholar->recommended_action ?: $this->fallbackRecommendedAction($fallbackLabel),
-                'modelMethod' => 'Heuristic Grade Rule',
+                'riskLabel' => $riskLabel,
+                'gradeMargin' => $mlEvaluation['gradeMargin'] ?? round(((float) $scholar->gpa) - $maintainingGrade, 2),
+                'decisionRule' => $mlEvaluation['decisionRule'] ?? null,
+                'probabilities' => $mlEvaluation['probabilities'] ?? null,
+                'riskReason' => $mlEvaluation['riskReason'] ?? "GPA is below the maintaining grade of {$maintainingGrade}.",
+                'recommendedAction' => $scholar->recommended_action ?: ($mlEvaluation['recommendedAction'] ?? 'Continue normal monitoring'),
+                'modelMethod' => 'Decision Tree Classifier',
                 'updatedAt' => $scholar->updated_at?->toISOString(),
             ];
         })->values()->all();
+
+        $riskSummary = collect(['Stable', 'Borderline', 'At Risk'])
+            ->map(fn (string $label): array => [
+                'label' => $label,
+                'count' => collect($riskRows)->where('riskLabel', $label)->count(),
+            ])
+            ->all();
+
+        $totalScholars = max(count($riskRows), 1);
+        $forecasts = collect($riskSummary)
+            ->map(fn (array $item): array => [
+                'label' => $item['label'],
+                'value' => (int) round(($item['count'] / $totalScholars) * 100),
+            ])
+            ->all();
+
+        return [
+            'available' => true,
+            'status' => 'online',
+            'method' => $mlResults['method'] ?? 'Decision Tree Classifier',
+            'riskRows' => $riskRows,
+            'riskSummary' => $riskSummary,
+            'forecasts' => $forecasts,
+        ];
     }
 
     /**
-     * Run ML evaluation via HTTP or subprocess.
+     * Run ML evaluation via HTTP or subprocess when explicitly configured.
      *
      * @param  array<int, array<string, mixed>>  $scholarsPayload
      * @return array<string, mixed>|null
@@ -106,7 +147,7 @@ class ScholarRiskService
         $driver = (string) config('services.forecasting.driver', 'auto');
 
         if ($driver === 'http' || $driver === 'auto') {
-            $serviceUrl = (string) config('services.forecasting.service_url', 'http://127.0.0.1:8000');
+            $serviceUrl = (string) config('services.forecasting.service_url', 'http://127.0.0.1:8001');
             try {
                 $response = Http::timeout(3)
                     ->connectTimeout(1)
@@ -121,11 +162,11 @@ class ScholarRiskService
                     }
                 }
             } catch (Throwable) {
-                // Fall back to process
+                // When HTTP is offline or unreachable, do not silently fallback in auto mode
             }
         }
 
-        if ($driver === 'process' || $driver === 'auto') {
+        if ($driver === 'process') {
             $pythonPath = (string) config('services.forecasting.python_path', 'python');
             $riskScriptPath = (string) config(
                 'services.forecasting.risk_script_path',
@@ -156,38 +197,5 @@ class ScholarRiskService
         }
 
         return null;
-    }
-
-    private function fallbackRiskLabel(Scholar $scholar, float $maintainingGrade): string
-    {
-        $gpa = (float) $scholar->gpa;
-
-        if ($gpa <= 0 || $gpa < $maintainingGrade) {
-            return 'At Risk';
-        }
-
-        return $gpa < ($maintainingGrade + 5) ? 'Borderline' : 'Stable';
-    }
-
-    private function fallbackRiskReason(Scholar $scholar, string $riskLabel, float $maintainingGrade): string
-    {
-        if ((float) $scholar->gpa <= 0) {
-            return "No GPA recorded. Maintaining grade is {$maintainingGrade}.";
-        }
-
-        return match ($riskLabel) {
-            'At Risk' => "GPA is below the maintaining grade of {$maintainingGrade}.",
-            'Borderline' => "GPA is close to the maintaining grade of {$maintainingGrade}.",
-            default => "GPA meets the maintaining grade of {$maintainingGrade}.",
-        };
-    }
-
-    private function fallbackRecommendedAction(string $riskLabel): string
-    {
-        return match ($riskLabel) {
-            'At Risk' => 'Schedule advising and monitor the next GPA submission',
-            'Borderline' => 'Send reminder and monitor next GPA submission',
-            default => 'Continue normal monitoring',
-        };
     }
 }

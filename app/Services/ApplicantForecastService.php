@@ -58,20 +58,44 @@ class ApplicantForecastService
 
         if ($mlResult !== null && ($mlResult['status'] ?? '') === 'success') {
             return [
+                'available' => true,
+                'status' => 'online',
                 'generatedAt' => now()->toISOString(),
                 'method' => $mlResult['method'] ?? 'Random Forest Regressor (lag & pace ensemble)',
                 'lookbackMonths' => $lookbackMonths,
-                'summary' => $mlResult['summary'],
+                'summary' => array_merge($mlResult['summary'], ['available' => true]),
                 'programs' => $mlResult['programs'],
             ];
         }
 
         return [
+            'available' => false,
+            'status' => 'offline',
+            'message' => 'ML Forecasting service is offline. Forecasting strictly relies on the Machine Learning service.',
             'generatedAt' => now()->toISOString(),
-            'method' => 'Weighted moving average with current-month pace',
+            'method' => 'ML Service Offline',
             'lookbackMonths' => $lookbackMonths,
-            'summary' => $summary,
-            'programs' => $programForecasts,
+            'summary' => [
+                'available' => false,
+                'programName' => $summary['programName'] ?? 'All Programs',
+                'currentMonthApplicants' => $summary['currentMonthApplicants'] ?? 0,
+                'predictedApplicantsThisMonth' => null,
+                'predictedApplicantsNextMonth' => null,
+                'averageMonthlyApplicants' => $summary['averageMonthlyApplicants'] ?? 0,
+                'confidence' => 'Unavailable',
+                'history' => $summary['history'] ?? [],
+            ],
+            'programs' => $programForecasts->map(fn (array $progForecast): array => [
+                'available' => false,
+                'programId' => $progForecast['programId'],
+                'programName' => $progForecast['programName'],
+                'currentMonthApplicants' => $progForecast['currentMonthApplicants'] ?? 0,
+                'predictedApplicantsThisMonth' => null,
+                'predictedApplicantsNextMonth' => null,
+                'averageMonthlyApplicants' => $progForecast['averageMonthlyApplicants'] ?? 0,
+                'confidence' => 'Unavailable',
+                'history' => $progForecast['history'] ?? [],
+            ])->all(),
         ];
     }
 

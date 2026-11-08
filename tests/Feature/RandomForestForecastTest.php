@@ -71,15 +71,19 @@ class RandomForestForecastTest extends TestCase
             $this->assertEquals(4, $response->json('applicantForecast.summary.currentMonthApplicants'));
             $this->assertGreaterThan(0, $response->json('applicantForecast.summary.predictedApplicantsThisMonth'));
 
-            // 2. With ML Disabled - Verify Fallback Driver
+            // 2. With ML Disabled - Verify Offline Fallback Contract
             config(['services.forecasting.enabled' => false]);
 
-            $fallbackResponse = $this->getJson("/api/analytics/applicant-forecast?dateRange=Last%203%20months&programId={$program->id}")
-                ->assertOk();
-
-            $fallbackMethod = (string) $fallbackResponse->json('applicantForecast.method');
-            $this->assertStringContainsString('Weighted moving average', $fallbackMethod);
-            $this->assertEquals(4, $fallbackResponse->json('applicantForecast.summary.currentMonthApplicants'));
+            $offlineResponse = $this->getJson("/api/analytics/applicant-forecast?dateRange=Last%203%20months&programId={$program->id}")
+                ->assertOk()
+                ->assertJsonPath('applicantForecast.available', false)
+                ->assertJsonPath('applicantForecast.status', 'offline')
+                ->assertJsonPath('applicantForecast.method', 'ML Service Offline')
+                ->assertJsonPath('applicantForecast.summary.available', false)
+                ->assertJsonPath('applicantForecast.summary.currentMonthApplicants', 4)
+                ->assertJsonPath('applicantForecast.summary.predictedApplicantsThisMonth', null)
+                ->assertJsonPath('applicantForecast.summary.predictedApplicantsNextMonth', null)
+                ->assertJsonPath('applicantForecast.summary.confidence', 'Unavailable');
         } finally {
             Carbon::setTestNow();
         }
